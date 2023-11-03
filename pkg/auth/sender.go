@@ -18,6 +18,7 @@ func findHeader(v base.HeaderValue, prefix string) string {
 }
 
 // Sender allows to send credentials.
+// Sender 允许发送凭据。
 type Sender struct {
 	user   string
 	pass   string
@@ -29,8 +30,11 @@ type Sender struct {
 // NewSender allocates a Sender.
 // It requires a WWW-Authenticate header (provided by the server)
 // and a set of credentials.
+// 它需要一个 WWW-Authenticate 标头（由服务器提供）和一组凭据。
 func NewSender(v base.HeaderValue, user string, pass string) (*Sender, error) {
-	// prefer digest
+	// prefer digest    更喜欢 digest
+
+	// 从 header 中查找 Digest
 	if v0 := findHeader(v, "Digest"); v0 != "" {
 		var auth headers.Authenticate
 		err := auth.Unmarshal(base.HeaderValue{v0})
@@ -55,6 +59,7 @@ func NewSender(v base.HeaderValue, user string, pass string) (*Sender, error) {
 		}, nil
 	}
 
+	// 从 header 中查找 Basic
 	if v0 := findHeader(v, "Basic"); v0 != "" {
 		var auth headers.Authenticate
 		err := auth.Unmarshal(base.HeaderValue{v0})
@@ -78,6 +83,7 @@ func NewSender(v base.HeaderValue, user string, pass string) (*Sender, error) {
 }
 
 // AddAuthorization adds the Authorization header to a Request.
+// 将授权标头添加到请求中。
 func (se *Sender) AddAuthorization(req *base.Request) {
 	urStr := req.URL.CloneWithoutCredentials().String()
 

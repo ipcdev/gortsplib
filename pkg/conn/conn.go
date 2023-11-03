@@ -13,6 +13,7 @@ const (
 )
 
 // Conn is a RTSP connection.
+// Conn 是一个 RTSP 连接
 type Conn struct {
 	w  io.Writer
 	br *bufio.Reader

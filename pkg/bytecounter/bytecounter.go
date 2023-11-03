@@ -7,6 +7,7 @@ import (
 )
 
 // ByteCounter is a io.ReadWriter wrapper that allows to count read and written bytes.
+// ByteCounter 是一个 io.ReadWriter 包装器，允许计算读取和写入的字节数。
 type ByteCounter struct {
 	rw       io.ReadWriter
 	received *uint64

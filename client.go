@@ -32,9 +32,9 @@ import (
 	"github.com/bluenviron/gortsplib/v4/pkg/url"
 )
 
-// convert an URL into an address, in particular:
-// * add default port
-// * handle IPv6 with or without square brackets.
+// convert an URL into an address, in particular:   将 URL 转换为地址，特别是：
+// * add default port                               * 添加默认端口
+// * handle IPv6 with or without square brackets.   * 处理带或不带方括号的 IPv6。
 // Adapted from net/http:
 // https://cs.opensource.google/go/go/+/refs/tags/go1.20.5:src/net/http/transport.go;l=2747
 func canonicalAddr(u *url.URL) string {
@@ -43,9 +43,9 @@ func canonicalAddr(u *url.URL) string {
 	port := u.Port()
 	if port == "" {
 		if u.Scheme == "rtsp" {
-			port = "554"
+			port = "554" // rtsp 默认端口为 554
 		} else { // rtsps
-			port = "322"
+			port = "322" // rtsps 默认端口为 322
 		}
 	}
 
@@ -64,7 +64,7 @@ func findBaseURL(sd *sdp.SessionDescription, res *base.Response, u *url.URL) (*u
 			return nil, fmt.Errorf("invalid control attribute: '%v'", control)
 		}
 
-		// add credentials
+		// add credentials  添加认证凭证
 		ret.User = u.User
 
 		return ret, nil
@@ -97,7 +97,9 @@ func prepareForAnnounce(desc *description.Session) {
 	}
 }
 
+// 从 Public 头读取服务端支持的 RTSP 方法，判断是否支持 GET_PARAMETER 方法
 func supportsGetParameter(header base.Header) bool {
+	// 读取 Public 头
 	pub, ok := header["Public"]
 	if !ok || len(pub) != 1 {
 		return false
@@ -137,11 +139,13 @@ func (s clientState) String() string {
 	return "unknown"
 }
 
+// OPTIONS 请求
 type optionsReq struct {
 	url *url.URL
 	res chan clientRes
 }
 
+// DESCRIBE 请求
 type describeReq struct {
 	url *url.URL
 	res chan clientRes
@@ -212,11 +216,11 @@ type Client struct {
 	//
 	// RTSP parameters (all optional)
 	//
-	// timeout of read operations.
-	// It defaults to 10 seconds.
+	// timeout of read operations.  读操作超时时间
+	// It defaults to 10 seconds.   默认：10s
 	ReadTimeout time.Duration
-	// timeout of write operations.
-	// It defaults to 10 seconds.
+	// timeout of write operations. 写操作超时时间
+	// It defaults to 10 seconds.   默认：10s
 	WriteTimeout time.Duration
 	// a TLS configuration to connect to TLS (RTSPS) servers.
 	// It defaults to nil.
@@ -230,53 +234,53 @@ type Client struct {
 	// If nil, it is chosen automatically (first UDP, then, if it fails, TCP).
 	// It defaults to nil.
 	Transport *Transport
-	// If the client is reading with UDP, it must receive
-	// at least a packet within this timeout, otherwise it switches to TCP.
-	// It defaults to 3 seconds.
+	// If the client is reading with UDP, it must receive                   如果客户端使用 UDP 读取，则必须在该超时时间内
+	// at least a packet within this timeout, otherwise it switches to TCP. 至少收到一个数据包，否则将切换到 TCP
+	// It defaults to 3 seconds.                                            默认：3s
 	InitialUDPReadTimeout time.Duration
-	// Size of the queue of outgoing packets.
-	// It defaults to 256.
+	// Size of the queue of outgoing packets.   传出数据包队列的大小（必须为 2 的次方）
+	// It defaults to 256.                      默认：256
 	WriteQueueSize int
-	// maximum size of outgoing RTP / RTCP packets.
-	// This must be less than the UDP MTU (1472 bytes).
-	// It defaults to 1472.
+	// maximum size of outgoing RTP / RTCP packets.     传出 RTP / RTCP 数据包的最大大小。
+	// This must be less than the UDP MTU (1472 bytes). 该值必须小于 UDP MTU（1472 字节）。
+	// It defaults to 1472.                             默认：1472（1500-20-8）
 	MaxPacketSize int
-	// user agent header.
-	// It defaults to "gortsplib"
+	// user agent header.           UserAgent 头
+	// It defaults to "gortsplib"   默认：gortsplib
 	UserAgent string
 	// disable automatic RTCP sender reports.
 	DisableRTCPSenderReports bool
-	// pointer to a variable that stores received bytes.
+	// pointer to a variable that stores received bytes.    指向存储 接收到的字节 的变量的指针。通过 ByteCounter 进行计算
 	BytesReceived *uint64
-	// pointer to a variable that stores sent bytes.
+	// pointer to a variable that stores sent bytes.        指向存储 发送的字节 的变量的指针。通过 ByteCounter 进行计算
 	BytesSent *uint64
 
 	//
 	// system functions (all optional)
 	//
-	// function used to initialize the TCP client.
+	// function used to initialize the TCP client.  用于初始化 TCP 客户端的函数。
 	// It defaults to (&net.Dialer{}).DialContext.
 	DialContext func(ctx context.Context, network, address string) (net.Conn, error)
-	// function used to initialize UDP listeners.
+	// function used to initialize UDP listeners.   用于初始化 UDP 侦听器的函数。
 	// It defaults to net.ListenPacket.
 	ListenPacket func(network, address string) (net.PacketConn, error)
 
 	//
 	// callbacks (all optional)
 	//
-	// called when sending a request to the server.
+	// called when sending a request to the server.         当发送一个请求到服务端时调用
 	OnRequest ClientOnRequestFunc
-	// called when receiving a response from the server.
+	// called when receiving a response from the server.    当从服务端接收到一个响应时调用
 	OnResponse ClientOnResponseFunc
-	// called when receiving a request from the server.
+	// called when receiving a request from the server.     当从服务端接收到一个请求时调用
 	OnServerRequest ClientOnRequestFunc
-	// called when sending a response to the server.
+	// called when sending a response to the server.        当发送一个响应到服务端时调用
 	OnServerResponse ClientOnResponseFunc
-	// called when the transport protocol changes.
+	// called when the transport protocol changes.          当传输协议变更时调用
 	OnTransportSwitch ClientOnTransportSwitchFunc
-	// called when the client detects lost packets.
+	// called when the client detects lost packets.         当客户端检测到丢包时调用
 	OnPacketLost ClientOnPacketLostFunc
-	// called when a non-fatal decode error occurs.
+	// called when a non-fatal decode error occurs.         当发生非 fatal 解码错误时调用
 	OnDecodeError ClientOnDecodeErrorFunc
 
 	//
@@ -288,31 +292,31 @@ type Client struct {
 	receiverReportPeriod time.Duration
 	checkTimeoutPeriod   time.Duration
 
-	connURL              *url.URL
+	connURL              *url.URL // rtsp url，在调用 Start() 函数时初始化，传入入参为 scheme（rtsp 或 rtsps）、host
 	ctx                  context.Context
 	ctxCancel            func()
-	state                clientState
-	nconn                net.Conn
-	conn                 *conn.Conn
-	session              string
-	sender               *auth.Sender
-	cseq                 int
-	optionsSent          bool
-	useGetParameter      bool
-	lastDescribeURL      *url.URL
+	state                clientState  // 客户端状态
+	nconn                net.Conn     // 网络连接（TCP 或者 TCP + TLS），通过 connOpen() 初始化
+	conn                 *conn.Conn   // RTSP 连接，通过 connOpen() 初始化
+	session              string       // 服务端返回的 session
+	sender               *auth.Sender // 身份认证（WWW-Authenticate 标头（由服务器提供）和一组身份凭据）
+	cseq                 int          // 客户端请求序号，每发送一个请求，该序号加 1
+	optionsSent          bool         // 客户端是否已经发送过 OPTIONS 请求
+	useGetParameter      bool         // 通过读取 OPTIONS 响应 Header 的 Public，判断服务端是否支持 GET_PARAMETER 方法
+	lastDescribeURL      *url.URL     // 发送 DESCRIBE 请求后，从响应的 Body 部分解析得到（优先级：control > Content-Base > request url）
 	baseURL              *url.URL
-	effectiveTransport   *Transport
+	effectiveTransport   *Transport // 实际使用的传输协议，发送 SETUP 请求时设置
 	medias               map[*description.Media]*clientMedia
 	tcpCallbackByChannel map[int]readFunc
 	lastRange            *headers.Range
 	checkTimeoutTimer    *time.Timer
 	checkTimeoutInitial  bool
 	tcpLastFrameTime     *int64
-	keepalivePeriod      time.Duration
+	keepalivePeriod      time.Duration // 如果 session 有超时时间，则需要设置保活周期
 	keepaliveTimer       *time.Timer
 	closeError           error
 	writer               asyncProcessor
-	reader               *clientReader
+	reader               *clientReader // 会启动一个协程，从 RTSP 连接中读取数据，当 chReadError 收到数据时会置为 nil
 	timeDecoder          *rtptime.GlobalDecoder
 	mustClose            bool
 
@@ -333,6 +337,11 @@ type Client struct {
 }
 
 // Start initializes the connection to a server.
+// 初始化到服务器的连接
+// 入参:
+//
+//	scheme  rtsp 或 rtsps
+//	host
 func (c *Client) Start(scheme string, host string) error {
 	// RTSP parameters
 	if c.ReadTimeout == 0 {
@@ -494,6 +503,7 @@ func (c *Client) Wait() error {
 	return c.closeError
 }
 
+// 调用 runInner()
 func (c *Client) run() {
 	defer close(c.done)
 
@@ -504,6 +514,16 @@ func (c *Client) run() {
 	c.doClose()
 }
 
+// for 死循环，处理 select-case 分支
+// 13 个分支：
+//
+//	7 个 RTSP 方法；
+//	readError
+//	readRequest
+//	readResponse
+//	超时时间
+//	保活时间
+//	ctxCancel
 func (c *Client) runInner() error {
 	for {
 		select {
@@ -597,13 +617,19 @@ func (c *Client) runInner() error {
 	}
 }
 
+// 等待服务端返回响应
+//  1. 读错误
+//  2. 读到服务端请求
+//  3. 读到服务端响应
 func (c *Client) waitResponse(requestCseqStr string) (*base.Response, error) {
+	// 读响应超时时间定时器
 	t := time.NewTimer(c.ReadTimeout)
 	defer t.Stop()
 
 	for {
 		select {
 		case <-t.C:
+			// 客户端读取超时
 			return nil, liberrors.ErrClientRequestTimedOut{}
 
 		case err := <-c.chReadError:
@@ -611,20 +637,24 @@ func (c *Client) waitResponse(requestCseqStr string) (*base.Response, error) {
 			return nil, err
 
 		case res := <-c.chReadResponse:
+			// 执行 OnResponse 回调
 			c.OnResponse(res)
 
 			// accept response if CSeq equals request CSeq, or if CSeq is not present
+			// 如果 CSeq 等于请求 CSeq，或者如果 CSeq 不存在，则接受响应
 			if cseq, ok := res.Header["CSeq"]; !ok || len(cseq) != 1 || strings.TrimSpace(cseq[0]) == requestCseqStr {
 				return res, nil
 			}
 
 		case req := <-c.chReadRequest:
+			// 处理服务端请求
 			err := c.handleServerRequest(req)
 			if err != nil {
 				return nil, err
 			}
 
 		case <-c.ctx.Done():
+			// 客户端终止
 			return nil, liberrors.ErrClientTerminated{}
 		}
 	}
@@ -701,6 +731,7 @@ func (c *Client) reset() {
 	c.tcpCallbackByChannel = nil
 }
 
+// 检查 当前客户端状态 是否为 allowed 中允许的状态
 func (c *Client) checkState(allowed map[clientState]struct{}) error {
 	if _, ok := allowed[c.state]; ok {
 		return nil
@@ -838,15 +869,18 @@ func (c *Client) stopWriter() {
 	c.writer.stop()
 }
 
+// 如果连接未建立，打开到服务端的连接
 func (c *Client) connOpen() error {
 	if c.nconn != nil {
 		return nil
 	}
 
+	// 只支持 rtsp 与 rtsps 两种协议
 	if c.connURL.Scheme != "rtsp" && c.connURL.Scheme != "rtsps" {
 		return liberrors.ErrClientUnsupportedScheme{Scheme: c.connURL.Scheme}
 	}
 
+	// 如果使用 rtsps，则传输协议必须为 TCP
 	if c.connURL.Scheme == "rtsps" && c.Transport != nil && *c.Transport != TransportTCP {
 		return liberrors.ErrClientRTSPSTCP{}
 	}
@@ -854,11 +888,13 @@ func (c *Client) connOpen() error {
 	dialCtx, dialCtxCancel := context.WithTimeout(c.ctx, c.ReadTimeout)
 	defer dialCtxCancel()
 
+	// 与服务器建立 tcp 连接
 	nconn, err := c.DialContext(dialCtx, "tcp", canonicalAddr(c.connURL))
 	if err != nil {
 		return err
 	}
 
+	// 如果使用的是 rtsps，则配置 TLS
 	if c.connURL.Scheme == "rtsps" {
 		tlsConfig := c.TLSConfig
 		if tlsConfig == nil {
@@ -877,7 +913,14 @@ func (c *Client) connOpen() error {
 	return nil
 }
 
+// 发送请求到服务端
+// 参数：
+//
+//	req     请求
+//	skip    是否跳过响应
 func (c *Client) do(req *base.Request, skipResponse bool) (*base.Response, error) {
+	// OPTIONS 必须作为第一个发送到服务端的请求
+	// 如果方法不为 OPTIONS 且 客户端尚未发送 OPTIONS 请求，则先发送 OPTIONS 请求
 	if !c.optionsSent && req.Method != base.Options {
 		_, err := c.doOptions(req.URL)
 		if err != nil {
@@ -885,6 +928,7 @@ func (c *Client) do(req *base.Request, skipResponse bool) (*base.Response, error
 		}
 	}
 
+	// 请求 Header 如果为 nil，则初始化
 	if req.Header == nil {
 		req.Header = make(base.Header)
 	}
@@ -893,28 +937,36 @@ func (c *Client) do(req *base.Request, skipResponse bool) (*base.Response, error
 		req.Header["Session"] = base.HeaderValue{c.session}
 	}
 
+	// 客户端请求序号放到 Header 的 CSeq 字段
 	c.cseq++
 	cseqStr := strconv.FormatInt(int64(c.cseq), 10)
 	req.Header["CSeq"] = base.HeaderValue{cseqStr}
 
+	// Header 填充 User-Agent
 	req.Header["User-Agent"] = base.HeaderValue{c.UserAgent}
 
+	// 如果 sender 不为 nil，则将授权标头添加到请求中。
 	if c.sender != nil {
 		c.sender.AddAuthorization(req)
 	}
 
+	// OnRequest 回调
 	c.OnRequest(req)
 
+	// 设置写超时时间
 	c.nconn.SetWriteDeadline(time.Now().Add(c.WriteTimeout))
+	// 发送请求
 	err := c.conn.WriteRequest(req)
 	if err != nil {
 		return nil, err
 	}
 
+	// 如果 skipResponse 为 true，表示不需要读取响应，发送请求后直接返回
 	if skipResponse {
 		return nil, nil
 	}
 
+	// 等待服务端返回响应（等待时间为读超时时间）
 	res, err := c.waitResponse(cseqStr)
 	if err != nil {
 		c.mustClose = true
@@ -922,6 +974,7 @@ func (c *Client) do(req *base.Request, skipResponse bool) (*base.Response, error
 	}
 
 	// get session from response
+	// 从响应中读取 session
 	if v, ok := res.Header["Session"]; ok {
 		var sx headers.Session
 		err := sx.Unmarshal(v)
@@ -930,22 +983,29 @@ func (c *Client) do(req *base.Request, skipResponse bool) (*base.Response, error
 		}
 		c.session = sx.Session
 
+		// 如果会话超时时间不为 nil，且 大于 0
 		if sx.Timeout != nil && *sx.Timeout > 0 {
+			// 设置保活周期 （timeout * 0.8）s
 			c.keepalivePeriod = time.Duration(*sx.Timeout) * time.Second * 8 / 10
 		}
 	}
 
-	// send request again with authentication
+	// send request again with authentication   再次发送请求并进行身份验证
+	// 如果响应码为 401 且 User 不为 nil 且 sender 为 nil
 	if res.StatusCode == base.StatusUnauthorized && req.URL.User != nil && c.sender == nil {
+		// 读取用户名、密码
 		pass, _ := req.URL.User.Password()
 		user := req.URL.User.Username()
 
+		// WWW-Authenticate 从响应中获取
+		// 创建 Sender
 		sender, err := auth.NewSender(res.Header["WWW-Authenticate"], user, pass)
 		if err != nil {
 			return nil, liberrors.ErrClientAuthSetup{Err: err}
 		}
 		c.sender = sender
 
+		// 重新发送请求
 		return c.do(req, skipResponse)
 	}
 
@@ -1027,7 +1087,9 @@ func (c *Client) doKeepAlive() error {
 	return err
 }
 
+// 发送 OPTIONS 请求
 func (c *Client) doOptions(u *url.URL) (*base.Response, error) {
+	// 检查客户端当前状态
 	err := c.checkState(map[clientState]struct{}{
 		clientStateInitial:   {},
 		clientStatePrePlay:   {},
@@ -1037,11 +1099,13 @@ func (c *Client) doOptions(u *url.URL) (*base.Response, error) {
 		return nil, err
 	}
 
+	// 建立网络连接（如果未建立）
 	err = c.connOpen()
 	if err != nil {
 		return nil, err
 	}
 
+	// 发送 OPTIONS 请求
 	res, err := c.do(&base.Request{
 		Method: base.Options,
 		URL:    u,
@@ -1050,22 +1114,26 @@ func (c *Client) doOptions(u *url.URL) (*base.Response, error) {
 		return nil, err
 	}
 
+	// 响应码非 200
 	if res.StatusCode != base.StatusOK {
-		// since this method is not implemented by every RTSP server,
-		// return an error only if status code is not 404
+		// since this method is not implemented by every RTSP server,   由于并非每个 RTSP 服务器都实现此方法，
+		// return an error only if status code is not 404               仅当状态码不是 404 时才返回错误
 		if res.StatusCode == base.StatusNotFound {
 			return res, nil
 		}
 		return nil, liberrors.ErrClientBadStatusCode{Code: res.StatusCode, Message: res.StatusMessage}
 	}
 
+	// optionsSent 置为 true，代表客户端已经发送过 OPTIONS 请求
 	c.optionsSent = true
+	// 是否支持 GET_PARAMETER 方法
 	c.useGetParameter = supportsGetParameter(res.Header)
 
 	return res, nil
 }
 
 // Options sends an OPTIONS request.
+// 发送一个 OPTIONS 请求
 func (c *Client) Options(u *url.URL) (*base.Response, error) {
 	cres := make(chan clientRes)
 	select {
@@ -1078,7 +1146,9 @@ func (c *Client) Options(u *url.URL) (*base.Response, error) {
 	}
 }
 
+// 发送一个 DESCRIBE 请求
 func (c *Client) doDescribe(u *url.URL) (*description.Session, *base.Response, error) {
+	// 检查客户端状态
 	err := c.checkState(map[clientState]struct{}{
 		clientStateInitial:   {},
 		clientStatePrePlay:   {},
@@ -1088,11 +1158,13 @@ func (c *Client) doDescribe(u *url.URL) (*description.Session, *base.Response, e
 		return nil, nil, err
 	}
 
+	// 打开连接（如果连接没有建立）
 	err = c.connOpen()
 	if err != nil {
 		return nil, nil, err
 	}
 
+	// 发送 DESCRIBE 请求
 	res, err := c.do(&base.Request{
 		Method: base.Describe,
 		URL:    u,
@@ -1105,7 +1177,7 @@ func (c *Client) doDescribe(u *url.URL) (*description.Session, *base.Response, e
 	}
 
 	if res.StatusCode != base.StatusOK {
-		// redirect
+		// redirect 重定向
 		if res.StatusCode >= base.StatusMovedPermanently &&
 			res.StatusCode <= base.StatusUseProxy &&
 			len(res.Header["Location"]) == 1 {
@@ -1131,24 +1203,29 @@ func (c *Client) doDescribe(u *url.URL) (*description.Session, *base.Response, e
 		return nil, res, liberrors.ErrClientBadStatusCode{Code: res.StatusCode, Message: res.StatusMessage}
 	}
 
+	// 从 response 响应 Header 中读取 Content-Type
+	// 如果没有，或者长度不为 1，返回 error
 	ct, ok := res.Header["Content-Type"]
 	if !ok || len(ct) != 1 {
 		return nil, nil, liberrors.ErrClientContentTypeMissing{}
 	}
 
-	// strip encoding information from Content-Type header
+	// strip encoding information from Content-Type header      从 Content-Type 标头中提取编码信息
 	ct = base.HeaderValue{strings.Split(ct[0], ";")[0]}
 
+	// 必须为 application/sdp
 	if ct[0] != "application/sdp" {
 		return nil, nil, liberrors.ErrClientContentTypeUnsupported{CT: ct}
 	}
 
+	// 从响应的 Body 部分解析 SDP Session 描述
 	var ssd sdp.SessionDescription
 	err = ssd.Unmarshal(res.Body)
 	if err != nil {
 		return nil, nil, liberrors.ErrClientSDPInvalid{Err: err}
 	}
 
+	// 从 SDP Session 描述中解析 RTSP 流描述
 	var desc description.Session
 	err = desc.Unmarshal(&ssd)
 	if err != nil {
@@ -1167,6 +1244,7 @@ func (c *Client) doDescribe(u *url.URL) (*description.Session, *base.Response, e
 }
 
 // Describe sends a DESCRIBE request.
+// 发送一个 DESCRIBE 请求
 func (c *Client) Describe(u *url.URL) (*description.Session, *base.Response, error) {
 	cres := make(chan clientRes)
 	select {
@@ -1179,6 +1257,7 @@ func (c *Client) Describe(u *url.URL) (*description.Session, *base.Response, err
 	}
 }
 
+// 发送一个 ANNOUNCE 请求
 func (c *Client) doAnnounce(u *url.URL, desc *description.Session) (*base.Response, error) {
 	err := c.checkState(map[clientState]struct{}{
 		clientStateInitial: {},
@@ -1236,6 +1315,7 @@ func (c *Client) Announce(u *url.URL, desc *description.Session) (*base.Response
 	}
 }
 
+// 发送一个 SETUP 请求
 func (c *Client) doSetup(
 	baseURL *url.URL,
 	medi *description.Media,
@@ -1275,10 +1355,12 @@ func (c *Client) doSetup(
 	cm := newClientMedia(c)
 
 	if c.effectiveTransport == nil {
+		// 如果 scheme 为 rtsps，则传输协议只能为 TCP
 		if c.connURL.Scheme == "rtsps" { // always use TCP if encrypted
 			v := TransportTCP
 			c.effectiveTransport = &v
 		} else if c.Transport != nil { // take transport from config
+			// 使用RTSP配置的传输协议（scheme 为 rtsp）
 			c.effectiveTransport = c.Transport
 		}
 	}
@@ -1335,6 +1417,7 @@ func (c *Client) doSetup(
 		return nil, err
 	}
 
+	// 发送 SETUP 请求
 	res, err := c.do(&base.Request{
 		Method: base.Setup,
 		URL:    mediaURL,
@@ -1510,6 +1593,7 @@ func (c *Client) doSetup(
 	c.baseURL = baseURL
 	c.effectiveTransport = &desiredTransport
 
+	// 变更客户端状态
 	if c.state == clientStateInitial {
 		c.state = clientStatePrePlay
 	}
