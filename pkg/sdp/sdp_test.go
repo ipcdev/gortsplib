@@ -2650,3 +2650,11 @@ func FuzzUnmarshal(f *testing.F) {
 		desc.Unmarshal([]byte(b)) //nolint:errcheck
 	})
 }
+
+func TestStringsReverseIndexByte(t *testing.T) {
+	value := "- 0 0"
+
+	indexByte := stringsReverseIndexByte(value, ' ')
+
+	t.Logf("indexByte: %d", indexByte)
+}

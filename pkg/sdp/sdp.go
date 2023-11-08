@@ -62,6 +62,7 @@ func parsePort(value string) (int, error) {
 	return port, nil
 }
 
+// 反序列化 sdp协议版本号，如果不为 0 返回错误
 func (s *SessionDescription) unmarshalProtocolVersion(value string) error {
 	if value != "0" {
 		return fmt.Errorf("invalid version")
@@ -70,11 +71,16 @@ func (s *SessionDescription) unmarshalProtocolVersion(value string) error {
 	return nil
 }
 
+// 会话名称
+// 格式：s=
+// 会话名称，在整个会话中有且只有1个 "s="
 func (s *SessionDescription) unmarshalSessionName(value string) error {
 	s.SessionName = psdp.SessionName(value)
 	return nil
 }
 
+// 从字符串 s 从后向前反向索引字节 b
+// 找到，返回字节 b 的索引下标；否则返回 -1
 func stringsReverseIndexByte(s string, b byte) int {
 	for i := len(s) - 2; i >= 0; i-- {
 		if s[i] == b {
@@ -86,28 +92,56 @@ func stringsReverseIndexByte(s string, b byte) int {
 
 // This is rewritten from scratch to make it compatible with most RTSP
 // implementations.
+// 这是从头开始重写的，以使其与大多数 RTSP 实现兼容。
+//
+// 格式：o=<username> <sessionid> <version> <network type> <address type> <address>
+// 描述：o=选项 对会话的发起者进行了描述;
+//
+//		<username>：   是用户的登录名, 如果主机不支持 <username>，则用 "-" 代替，<username> 不能包含空格；
+//		<session id>： 是一个数字串，在整个会话中，必须是唯一的，建议使用 NTP 时间戳;
+//		<version>:     该会话公告的版本
+//		<networktype>: 网络类型，一般为 "IN", 表示 internet
+//		<addresstype>: 地址类型，一般为 IP4
+//	    <adress>:      地址
+//
+// 示例：
+// line:  o=- 0 0 IN IP4 127.0.0.1
+// key:   o
+// value: - 0 0 IN IP4 127.0.0.1
 func (s *SessionDescription) unmarshalOrigin(value string) error {
+	// 将入参中的 " IN IPV4 " 替换成 " IN IP4 "
 	value = strings.Replace(value, " IN IPV4 ", " IN IP4 ", 1)
 
+	// 判断 value 中是否有 " IN IP4 " 字符串
 	i := strings.Index(value, " IN IP4 ")
 	if i < 0 {
+		// 如果没有，判断是否有 " IN IP6 " 字符串
 		i = strings.Index(value, " IN IP6 ")
 		if i < 0 {
+			// 如果没有，返回错误
 			return fmt.Errorf("%w `o=%v`", errSDPInvalidSyntax, value)
 		}
 	}
 
+	// 网络类型：IN
 	s.Origin.NetworkType = value[i+1 : i+3]
+	// 地址类型：IP4
 	s.Origin.AddressType = value[i+4 : i+7]
+	// 单播地址：127.0.0.1
 	s.Origin.UnicastAddress = strings.TrimSpace(value[i+8:])
+
+	// 更新 value 为 "- 0 0"
 	value = value[:i]
 
+	// 从后向前遍历 value，返回 ' ' 的下标
 	i = stringsReverseIndexByte(value, ' ')
 	if i < 0 {
 		return fmt.Errorf("%w `o=%v`", errSDPInvalidSyntax, value)
 	}
 
 	var tmp string
+	// tmp  : "0"
+	// value: "- 0"
 	tmp, value = value[i+1:], value[:i]
 
 	var err error
@@ -117,6 +151,7 @@ func (s *SessionDescription) unmarshalOrigin(value string) error {
 		i := strings.Index(tmp, ".")
 		s.Origin.SessionVersion, err = strconv.ParseUint(tmp[:i], 16, 64)
 	default:
+		// 会话版本号
 		s.Origin.SessionVersion, err = strconv.ParseUint(tmp, 10, 64)
 	}
 	if err != nil {
@@ -127,11 +162,14 @@ func (s *SessionDescription) unmarshalOrigin(value string) error {
 		value = "- 0"
 	}
 
+	// value: "- 0"
 	i = stringsReverseIndexByte(value, ' ')
 	if i < 0 {
 		return nil
 	}
 
+	// tmp  : 0
+	// value: -
 	tmp, value = value[i+1:], value[:i]
 
 	switch {
@@ -143,12 +181,14 @@ func (s *SessionDescription) unmarshalOrigin(value string) error {
 		i := strings.Index(tmp, ".")
 		s.Origin.SessionID, err = strconv.ParseUint(tmp[:i], 16, 64)
 	default:
+		// SessionID
 		s.Origin.SessionID, err = strconv.ParseUint(tmp, 10, 64)
 	}
 	if err != nil {
 		return fmt.Errorf("%w `%v`", errSDPInvalidNumericValue, tmp)
 	}
 
+	// Username
 	s.Origin.Username = value
 
 	return nil
@@ -218,6 +258,14 @@ func unmarshalConnectionInformation(value string) (*psdp.ConnectionInformation, 
 	}, nil
 }
 
+// 格式： c=<networktype> <address type> <connection address>
+// 描述：表示媒体连接信息；一个会话级描述中必须有 "c=" 或者 在每个媒体级描述中有一个 "c=" 选项，也可能在会话级描述和媒体级描述中都有 "c=" 选项；
+//
+//	<network type>：      表示网络类型，一般为 IN，表示 internet；
+//	<address type>：      地址类型，一般为 IP4；
+//	<connection address>：地址，可能为 域名 或 ip地址 两种形式
+//
+// 示例：c=IN IP4 172.17.133.211
 func (s *SessionDescription) unmarshalSessionConnectionInformation(value string) error {
 	var err error
 	s.ConnectionInformation, err = unmarshalConnectionInformation(value)
@@ -302,19 +350,47 @@ func (s *SessionDescription) unmarshalSessionEncryptionKey(value string) error {
 	return nil
 }
 
+// 格式 ：a=<*>
+// 描述：表示一个会话级别 或 媒体级别下的 0个或多个 属性
+//
+// 示例：
+//
+//	a=tool:libavformat 60.4.100
+//	a=rtpmap:96 H264/90000
+//	a=control:streamid=0
+//	a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=1390
+//	... ...
 func (s *SessionDescription) unmarshalSessionAttribute(value string) error {
+	// IndexRune()
+	// 在一个 字符串 中从开始查找一个 中文 字符。
+	// 函数返回 int 类型的值，如果包含，则返回第一次出现字符的索引；反之，则返回 -1。
+
+	// 从 value 查找 : 字符
 	i := strings.IndexRune(value, ':')
+
 	var a psdp.Attribute
-	if i > 0 {
+	if i > 0 { // 找到 : 字符
+		// 使用 : 分隔 key、value
 		a = psdp.NewAttribute(value[:i], value[i+1:])
-	} else {
+	} else { // 没找到 : 字符
+		// 将 value 作为 key
 		a = psdp.NewPropertyAttribute(value)
 	}
 
 	s.Attributes = append(s.Attributes, a)
+
 	return nil
 }
 
+// 格式：t=<start time> <stop time>
+//
+// 描述：t 字段描述了会话的 开始时间 和 结束时间
+//
+//	<start time> <stop time> 为 NTP 时间，单位是秒；
+//	如果 <stop time> 为 0 表示过了 <start time> 之后，会话一直持续；
+//	当 <start time> 和 <stop time> 都为 0 的时候，表示持久会话；
+//
+//	建议：两个值不设为 0，如果设为 0，不知道开始时间和结束时间，增大了调度的难度。
 func (s *SessionDescription) unmarshalTiming(value string) error {
 	if value == "now-" {
 		// special case for some FLIR cameras with invalid timing element
@@ -411,6 +487,21 @@ func (s *SessionDescription) unmarshalRepeatTimes(value string) error {
 	return nil
 }
 
+// 格式：m=<media> <port> <transport type> <fmt list>
+//
+// 描述：
+//
+//	 <media>：    表示媒体类型，有 "audio", "video", "application", "data"（不向用户显示的数据）, "control"（描述额外的控制通道）;
+//	 <port>：     表示媒体流发往传输层的端口，对于 RTP，偶数端口用来传输数据，奇数端口用来;
+//	 <transport>：表示传输协议，与 "c=" 一行相关联，
+//	     一般用 RTP/AVP 表示，即 Realtime Transport Protocol using the Audio/Video profile over udp，即我们常说的 RTP over udp;
+//	 <fmt list>：表示媒体格式，分为静态绑定和动态绑定
+//		    静态绑定：媒体编码方式与 RTP 负载类型有确定的一一对应关系，如: m=audio 0 RTP/AVP 8
+//		    动态绑定：媒体编码方式没有完全确定，需要使用 rtpmap 进行进一步的说明: 如：
+//	            m=video 0 RTP/AVP 96
+//		        a=rtpmap:96 H264/90000
+//
+// 示例：
 func (s *SessionDescription) unmarshalMediaDescription(value string) error {
 	fields := strings.Fields(value)
 	if len(fields) < 4 {
@@ -527,15 +618,18 @@ const (
 	stateTimeDescription
 )
 
+// 反序列化 Session
 func (s *SessionDescription) unmarshalSession(state *unmarshalState, key byte, val string) error {
 	switch key {
 	case 'o':
+		// 反序列化源（o, Origin）
 		err := s.unmarshalOrigin(val)
 		if err != nil {
 			return err
 		}
 
 	case 's':
+		// 会话名称
 		err := s.unmarshalSessionName(val)
 		if err != nil {
 			return err
@@ -566,6 +660,7 @@ func (s *SessionDescription) unmarshalSession(state *unmarshalState, key byte, v
 		}
 
 	case 'c':
+		// 会话连接信息
 		err := s.unmarshalSessionConnectionInformation(val)
 		if err != nil {
 			return err
@@ -590,12 +685,14 @@ func (s *SessionDescription) unmarshalSession(state *unmarshalState, key byte, v
 		}
 
 	case 'a':
+		// 会话属性
 		err := s.unmarshalSessionAttribute(val)
 		if err != nil {
 			return err
 		}
 
 	case 't':
+		// 会话开始、结束时间
 		err := s.unmarshalTiming(val)
 		if err != nil {
 			return err
@@ -603,6 +700,7 @@ func (s *SessionDescription) unmarshalSession(state *unmarshalState, key byte, v
 		*state = stateTimeDescription
 
 	case 'm':
+		// 媒体描述
 		err := s.unmarshalMediaDescription(val)
 		if err != nil {
 			return err
@@ -669,11 +767,13 @@ func (s *SessionDescription) Unmarshal(byts []byte) error {
 
 	state := stateInitial
 
+	// 将 sdp 中的 \r 替换成 ""，并按照 \n 切分
 	for _, line := range strings.Split(strings.ReplaceAll(str, "\r", ""), "\n") {
 		if line == "" {
 			continue
 		}
 
+		// 如果长度小于 2，或者第二个字符不是 =
 		if len(line) < 2 || line[1] != '=' {
 			return fmt.Errorf("invalid line: (%s)", line)
 		}
@@ -685,10 +785,13 @@ func (s *SessionDescription) Unmarshal(byts []byte) error {
 		case stateInitial:
 			switch key {
 			case 'v':
+				// 处理 sdp 版本号
 				err := s.unmarshalProtocolVersion(val)
 				if err != nil {
 					return err
 				}
+
+				// 更新状态为 stateSession
 				state = stateSession
 
 			default:

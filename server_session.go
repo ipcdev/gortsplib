@@ -177,9 +177,10 @@ func (s ServerSessionState) String() string {
 }
 
 // ServerSession is a server-side RTSP session.
+// ServerSession 是服务器端 RTSP 会话
 type ServerSession struct {
 	s        *Server
-	secretID string // must not be shared, allows to take ownership of the session
+	secretID string // must not be shared, allows to take ownership of the session 不得共享，允许获得会话的所有权
 	author   *ServerConn
 
 	ctx                   context.Context
@@ -188,7 +189,7 @@ type ServerSession struct {
 	bytesSent             *uint64
 	userData              interface{}
 	conns                 map[*ServerConn]struct{}
-	state                 ServerSessionState
+	state                 ServerSessionState // 会话状态
 	setuppedMedias        map[*description.Media]*serverSessionMedia
 	setuppedMediasOrdered []*serverSessionMedia
 	tcpCallbackByChannel  map[int]readFunc
@@ -196,7 +197,7 @@ type ServerSession struct {
 	setuppedStream        *ServerStream // read
 	setuppedPath          string
 	setuppedQuery         string
-	lastRequestTime       time.Time
+	lastRequestTime       time.Time // 上一个客户端请求的时间
 	tcpConn               *ServerConn
 	announcedDesc         *description.Session // publish
 	udpLastPacketTime     *int64               // publish
@@ -338,6 +339,7 @@ func (ss *ServerSession) onStreamWriteError(err error) {
 	}
 }
 
+// 检查服务端会话状态
 func (ss *ServerSession) checkState(allowed map[ServerSessionState]struct{}) error {
 	if _, ok := allowed[ss.state]; ok {
 		return nil
@@ -564,6 +566,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 		}, nil
 
 	case base.Announce:
+		// 检查会话状态
 		err := ss.checkState(map[ServerSessionState]struct{}{
 			ServerSessionStateInitial: {},
 		})
@@ -573,6 +576,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			}, err
 		}
 
+		// 读取请求头的 Content-Type
 		ct, ok := req.Header["Content-Type"]
 		if !ok || len(ct) != 1 {
 			return &base.Response{
@@ -580,12 +584,14 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			}, liberrors.ErrServerContentTypeMissing{}
 		}
 
+		// Content-Type 必须为 application/sdp
 		if ct[0] != "application/sdp" {
 			return &base.Response{
 				StatusCode: base.StatusBadRequest,
 			}, liberrors.ErrServerContentTypeUnsupported{CT: ct}
 		}
 
+		// 解析请求Body部分 会话描述协议
 		var ssd sdp.SessionDescription
 		err = ssd.Unmarshal(req.Body)
 		if err != nil {

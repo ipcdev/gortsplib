@@ -36,6 +36,7 @@ func (sl *serverTCPListener) run() {
 	defer sl.s.wg.Done()
 
 	for {
+		// 等待连接
 		nconn, err := sl.ln.Accept()
 		if err != nil {
 			sl.s.acceptErr(err)

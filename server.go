@@ -52,12 +52,17 @@ type Server struct {
 	//
 	// the RTSP address of the server, to accept connections and send and receive
 	// packets with the TCP transport.
+	// 服务器的 RTSP 地址，用于接受连接并通过 TCP 传输发送和接收数据包。
 	RTSPAddress string
 	// a port to send and receive RTP packets with the UDP transport.
 	// If UDPRTPAddress and UDPRTCPAddress are filled, the server can support the UDP transport.
+	// 使用 UDP 传输发送和接收 RTP 数据包的端口。
+	// 如果 UDPRTPAddress 和 UDPRTCPAddress 已填写，则服务器可以支持 UDP 传输。
 	UDPRTPAddress string
 	// a port to send and receive RTCP packets with the UDP transport.
 	// If UDPRTPAddress and UDPRTCPAddress are filled, the server can support the UDP transport.
+	// 使用 UDP 传输发送和接收 RTCP 数据包的端口。
+	// 如果 UDPRTPAddress 和 UDPRTCPAddress 已填写，则服务器可以支持 UDP 传输。
 	UDPRTCPAddress string
 	// a range of multicast IPs to use with the UDP-multicast transport.
 	// If MulticastIPRange, MulticastRTPPort, MulticastRTCPPort are filled, the server
@@ -73,11 +78,14 @@ type Server struct {
 	MulticastRTCPPort int
 	// timeout of read operations.
 	// It defaults to 10 seconds
+	// 读超时时间，默认 10s
 	ReadTimeout time.Duration
 	// timeout of write operations.
 	// It defaults to 10 seconds
+	// 写超时时间，默认 10s
 	WriteTimeout time.Duration
 	// a TLS configuration to accept TLS (RTSPS) connections.
+	// 用于接受 TLS (RTSPS) 连接的 TLS 配置。
 	TLSConfig *tls.Config
 	// Size of the queue of outgoing packets.
 	// It defaults to 256.
@@ -101,6 +109,8 @@ type Server struct {
 	//
 	// function used to initialize the TCP listener.
 	// It defaults to net.Listen.
+	// 用于初始化 TCP listener 的函数。
+	// 默认是 net.Listen。
 	Listen func(network string, address string) (net.Listener, error)
 	// function used to initialize UDP listeners.
 	// It defaults to net.ListenPacket.
@@ -110,7 +120,7 @@ type Server struct {
 	// private
 	//
 
-	timeNow              func() time.Time
+	timeNow              func() time.Time // 获取当前时间函数
 	senderReportPeriod   time.Duration
 	receiverReportPeriod time.Duration
 	sessionTimeout       time.Duration
@@ -129,7 +139,7 @@ type Server struct {
 	closeError      error
 
 	// in
-	chNewConn        chan net.Conn
+	chNewConn        chan net.Conn // 当有新的客户端连接请求时
 	chAcceptErr      chan error
 	chCloseConn      chan *ServerConn
 	chHandleRequest  chan sessionRequestReq
@@ -138,6 +148,7 @@ type Server struct {
 }
 
 // Start starts the server.
+// 启动服务
 func (s *Server) Start() error {
 	// RTSP parameters
 	if s.ReadTimeout == 0 {
@@ -182,10 +193,12 @@ func (s *Server) Start() error {
 		s.checkStreamPeriod = 1 * time.Second
 	}
 
+	// TLS 不能使用 UDP
 	if s.TLSConfig != nil && s.UDPRTPAddress != "" {
 		return fmt.Errorf("TLS can't be used with UDP")
 	}
 
+	// TLS 不能使用 UDP 广播
 	if s.TLSConfig != nil && s.MulticastIPRange != "" {
 		return fmt.Errorf("TLS can't be used with UDP-multicast")
 	}
@@ -194,11 +207,13 @@ func (s *Server) Start() error {
 		return fmt.Errorf("RTSPAddress not provided")
 	}
 
+	// UDPRTPAddress、UDPRTCPAddress 必须都提供
 	if (s.UDPRTPAddress != "" && s.UDPRTCPAddress == "") ||
 		(s.UDPRTPAddress == "" && s.UDPRTCPAddress != "") {
 		return fmt.Errorf("UDPRTPAddress and UDPRTCPAddress must be used together")
 	}
 
+	// UDP
 	if s.UDPRTPAddress != "" {
 		rtpPort, err := extractPort(s.UDPRTPAddress)
 		if err != nil {
@@ -240,6 +255,7 @@ func (s *Server) Start() error {
 		}
 	}
 
+	// 广播
 	if s.MulticastIPRange != "" && (s.MulticastRTPPort == 0 || s.MulticastRTCPPort == 0) ||
 		(s.MulticastRTPPort != 0 && (s.MulticastRTCPPort == 0 || s.MulticastIPRange == "")) ||
 		s.MulticastRTCPPort != 0 && (s.MulticastRTPPort == 0 || s.MulticastIPRange == "") {
@@ -300,7 +316,7 @@ func (s *Server) Start() error {
 	s.chGetMulticastIP = make(chan chGetMulticastIPReq)
 
 	var err error
-	s.tcpListener, err = newServerTCPListener(s)
+	s.tcpListener, err = newServerTCPListener(s) // 创建服务端 TCP Listener
 	if err != nil {
 		if s.udpRTPListener != nil {
 			s.udpRTPListener.close()

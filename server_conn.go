@@ -17,6 +17,7 @@ import (
 	"github.com/bluenviron/gortsplib/v4/pkg/url"
 )
 
+// 从请求头中获取 sessionID
 func getSessionID(header base.Header) string {
 	if h, ok := header["Session"]; ok && len(h) == 1 {
 		return h[0]
@@ -88,6 +89,7 @@ func newServerConn(
 ) *ServerConn {
 	ctx, ctxCancel := context.WithCancel(s.ctx)
 
+	// TLS 配置
 	if s.TLSConfig != nil {
 		nconn = tls.Server(nconn, s.TLSConfig)
 	}
@@ -153,13 +155,17 @@ func (sc *ServerConn) run() {
 	defer sc.s.wg.Done()
 	defer close(sc.done)
 
+	// 判断 Server.Handler 是否实现了 ServerHandlerOnConnOpen 接口
 	if h, ok := sc.s.Handler.(ServerHandlerOnConnOpen); ok {
 		h.OnConnOpen(&ServerHandlerOnConnOpenCtx{
 			Conn: sc,
 		})
 	}
 
+	// 创建 RTSP 连接
 	sc.conn = conn.NewConn(sc.bc)
+
+	// 创建 ServerConnReader
 	cr := newServerConnReader(sc)
 
 	err := sc.runInner()
@@ -216,6 +222,7 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 
 	var path string
 	var query string
+
 	switch req.Method {
 	case base.Describe, base.GetParameter, base.SetParameter:
 		pathAndQuery, ok := req.URL.RTSPPathAndQuery()
@@ -417,8 +424,13 @@ func (sc *ServerConn) handleRequestInSession(
 		// client may not have received the session ID yet due to multiple reasons:
 		// * requests can be retries after code 301
 		// * SETUP requests comes after ANNOUNCE response, that don't contain the session ID
+		//
+		// 会话 ID 在 SETUP 和 ANNOUNCE 请求中是可选的，因为客户端可能由于多种原因尚未收到会话 ID：
+		// * 请求可以在代码 301 之后重试
+		// * SETUP 请求在 ANNOUNCE 响应之后出现，不包含会话 ID
 		if sxID != "" {
 			// the connection can't communicate with two sessions at once.
+			// 连接无法同时与两个会话通信。
 			if sxID != sc.session.secretID {
 				return &base.Response{
 					StatusCode: base.StatusBadRequest,
