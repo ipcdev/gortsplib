@@ -12,6 +12,7 @@ import (
 )
 
 // SessionDescription is a SDP session description.
+// SDP session 描述
 type SessionDescription psdp.SessionDescription
 
 // Attribute returns the value of an attribute and if it exists
@@ -277,6 +278,7 @@ func (s *SessionDescription) unmarshalSessionConnectionInformation(value string)
 }
 
 func unmarshalBandwidth(value string) (*psdp.Bandwidth, error) {
+	// 使用 : 进行分隔 value，分割后长度必须为 2
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("%w `b=%v`", errSDPInvalidValue, parts)
@@ -285,7 +287,7 @@ func unmarshalBandwidth(value string) (*psdp.Bandwidth, error) {
 	experimental := strings.HasPrefix(parts[0], "X-")
 	if experimental {
 		parts[0] = strings.TrimPrefix(parts[0], "X-")
-	} else if !anyOf(parts[0], "CT", "AS", "TIAS", "RS", "RR") {
+	} else if !anyOf(parts[0], "CT", "AS", "TIAS", "RS", "RR") { // 支持 CT、AS、TIAS、RS、RR
 		// Set according to currently registered with IANA
 		// https://tools.ietf.org/html/rfc4566#section-5.8
 		// https://tools.ietf.org/html/rfc3890#section-6.2
@@ -502,8 +504,16 @@ func (s *SessionDescription) unmarshalRepeatTimes(value string) error {
 //		        a=rtpmap:96 H264/90000
 //
 // 示例：
+//
+// 解析 m=video 0 RTP/AVP 96 （媒体类型 端口 协议 格式）
+// 将数据填充到 MediaName 结构体
 func (s *SessionDescription) unmarshalMediaDescription(value string) error {
+	// 以连续的空白字符为分隔符，将 s 切分成多个子串，结果中不包含空白字符本身。
+	// 空白字符有：\t, \n, \v, \f, \r, ’ ‘, U+0085 (NEL), U+00A0 (NBSP) 。
+	// 如果 s 中只包含空白字符，则返回一个空列表
 	fields := strings.Fields(value)
+
+	// 切分后的切片长度不能小于 4
 	if len(fields) < 4 {
 		return fmt.Errorf("%w `m=%v`", errSDPInvalidSyntax, fields)
 	}
@@ -519,9 +529,11 @@ func (s *SessionDescription) unmarshalMediaDescription(value string) error {
 		!strings.HasPrefix(fields[0], "application/") {
 		return fmt.Errorf("%w `%v`", errSDPInvalidValue, fields[0])
 	}
+	// 媒体类型
 	newMediaDesc.MediaName.Media = fields[0]
 
 	// <port>
+	// 可以支持的格式为：端口 或者 端口/端口范围
 	parts := strings.Split(fields[1], "/")
 	var err error
 	newMediaDesc.MediaName.Port.Value, err = parsePort(parts[0])
@@ -529,6 +541,7 @@ func (s *SessionDescription) unmarshalMediaDescription(value string) error {
 		return fmt.Errorf("%w `%v`", errSDPInvalidPortValue, parts[0])
 	}
 
+	// 端口范围
 	if len(parts) > 1 {
 		portRange, err := strconv.Atoi(parts[1])
 		if err != nil {
@@ -540,6 +553,7 @@ func (s *SessionDescription) unmarshalMediaDescription(value string) error {
 	// <proto>
 	// Set according to currently registered with IANA
 	// https://tools.ietf.org/html/rfc4566#section-5.14
+	// 协议
 	for _, proto := range strings.Split(fields[2], "/") {
 		if i := indexOf(proto, []string{
 			"UDP", "RTP", "AVP", "SAVP", "SAVPF",
@@ -667,6 +681,7 @@ func (s *SessionDescription) unmarshalSession(state *unmarshalState, key byte, v
 		}
 
 	case 'b':
+		// 带宽
 		err := s.unmarshalSessionBandwidth(val)
 		if err != nil {
 			return err
@@ -685,7 +700,7 @@ func (s *SessionDescription) unmarshalSession(state *unmarshalState, key byte, v
 		}
 
 	case 'a':
-		// 会话属性
+		// 会话属性（格式为 key:value）
 		err := s.unmarshalSessionAttribute(val)
 		if err != nil {
 			return err

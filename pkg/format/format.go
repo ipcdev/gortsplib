@@ -27,6 +27,8 @@ type unmarshalContext struct {
 
 // Format is a media format.
 // It defines the payload type of RTP packets and how to encode/decode them.
+// Format 是一种媒体格式。
+// 它定义了 RTP 数据包的有效负载类型以及如何对其进行编码/解码。
 type Format interface {
 	unmarshal(ctx *unmarshalContext) error
 

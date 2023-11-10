@@ -41,11 +41,13 @@ func hasMediaWithID(medias []*Media, id string) bool {
 type SessionFECGroup []string
 
 // Session is the description of a RTSP stream.
+// Session 是一个 RTSP 流的描述
 type Session struct {
 	// Base URL of the stream (read only).
 	BaseURL *url.URL
 
 	// Title of the stream (optional).
+	// 使用 SDP 的 session name 填充（SDP 中的 s=No Name）
 	Title string
 
 	// FEC groups (RFC5109).
@@ -69,6 +71,7 @@ func (d *Session) FindFormat(forma interface{}) *Media {
 
 // Unmarshal decodes the description from SDP.
 func (d *Session) Unmarshal(ssd *sdp.SessionDescription) error {
+	// 会话名
 	d.Title = string(ssd.SessionName)
 	if d.Title == " " {
 		d.Title = ""

@@ -107,7 +107,9 @@ func findFirstSupportedTransportHeader(s *Server, tsh headers.Transports) *heade
 	// Per RFC2326 section 12.39, client specifies transports in order of preference.
 	// Filter out the ones we don't support and then pick first supported transport.
 	for _, tr := range tsh {
+		// 是否为广播 Multicast
 		isMulticast := tr.Delivery != nil && *tr.Delivery == headers.TransportDeliveryMulticast
+
 		if tr.Protocol == headers.TransportProtocolUDP &&
 			((!isMulticast && s.udpRTPListener == nil) ||
 				(isMulticast && s.MulticastIPRange == "")) {
@@ -193,14 +195,14 @@ type ServerSession struct {
 	setuppedMedias        map[*description.Media]*serverSessionMedia
 	setuppedMediasOrdered []*serverSessionMedia
 	tcpCallbackByChannel  map[int]readFunc
-	setuppedTransport     *Transport
+	setuppedTransport     *Transport    // 传输协议 TCP、UDP、UDP-Multicast（SETUP 请求设置）
 	setuppedStream        *ServerStream // read
-	setuppedPath          string
-	setuppedQuery         string
-	lastRequestTime       time.Time // 上一个客户端请求的时间
+	setuppedPath          string        // RTSP URL Path 部分 (Announce 请求设置)
+	setuppedQuery         string        // RTSP URL Query 部分 (Announce 请求设置)
+	lastRequestTime       time.Time     // 上一个客户端请求的时间
 	tcpConn               *ServerConn
-	announcedDesc         *description.Session // publish
-	udpLastPacketTime     *int64               // publish
+	announcedDesc         *description.Session // publish  从 announce 请求体 SDP 中解析得到的 RTSP 描述 (Announce 请求设置)
+	udpLastPacketTime     *int64               // publish  udp最后一个包的时间
 	udpCheckStreamTimer   *time.Timer
 	writer                asyncProcessor
 	timeDecoder           *rtptime.GlobalDecoder
@@ -566,6 +568,9 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 		}, nil
 
 	case base.Announce:
+		// Announce 方法有两个用途：
+		//  C -> S : 将请求 URL 的媒体对象描述发送给服务器
+
 		// 检查会话状态
 		err := ss.checkState(map[ServerSessionState]struct{}{
 			ServerSessionStateInitial: {},
@@ -591,7 +596,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			}, liberrors.ErrServerContentTypeUnsupported{CT: ct}
 		}
 
-		// 解析请求Body部分 会话描述协议
+		// 解析请求 Body 部分 SDP 会话描述协议
 		var ssd sdp.SessionDescription
 		err = ssd.Unmarshal(req.Body)
 		if err != nil {
@@ -600,6 +605,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			}, liberrors.ErrServerSDPInvalid{Err: err}
 		}
 
+		// 从 SDP 会话描述中获取 RTSP 流描述信息
 		var desc description.Session
 		err = desc.Unmarshal(&ssd)
 		if err != nil {
@@ -608,7 +614,9 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			}, liberrors.ErrServerSDPInvalid{Err: err}
 		}
 
+		// 遍历 media（sdp 中几个 m= ，就有几个 media）
 		for _, medi := range desc.Medias {
+			// 处理 request 中的 url 与 control 属性
 			mediURL, err := medi.URL(req.URL)
 			if err != nil {
 				return &base.Response{
@@ -616,6 +624,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 				}, fmt.Errorf("unable to generate media URL")
 			}
 
+			// 获取 RTSP URL 的 Path 和 Query 部分
 			mediPath, ok := mediURL.RTSPPathAndQuery()
 			if !ok {
 				return &base.Response{
@@ -623,6 +632,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 				}, fmt.Errorf("invalid media URL (%v)", mediURL)
 			}
 
+			// Path 检查
 			if !strings.HasPrefix(mediPath, path) {
 				return &base.Response{
 						StatusCode: base.StatusBadRequest,
@@ -631,6 +641,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			}
 		}
 
+		// 执行 OnAnnounce 回调
 		res, err := ss.s.Handler.(ServerHandlerOnAnnounce).OnAnnounce(&ServerHandlerOnAnnounceCtx{
 			Session:     ss,
 			Conn:        sc,
@@ -644,7 +655,9 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			return res, err
 		}
 
+		// 会话状态变更
 		ss.state = ServerSessionStatePreRecord
+
 		ss.setuppedPath = path
 		ss.setuppedQuery = query
 		ss.announcedDesc = &desc
@@ -652,6 +665,9 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 		return res, err
 
 	case base.Setup:
+		// C -> S SETUP request  // 通过 Transport 头字段列出可接受的传输选项，请求 S 建立会话
+		// S -> C SETUP response // S建立会话，通过 Transport 头字段返回选择的具体转输选项，并返回建立的 Session ID;
+
 		err := ss.checkState(map[ServerSessionState]struct{}{
 			ServerSessionStateInitial:   {},
 			ServerSessionStatePrePlay:   {},
@@ -664,6 +680,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 		}
 
 		var inTSH headers.Transports
+		// 反序列化 Transport 头
 		err = inTSH.Unmarshal(req.Header["Transport"])
 		if err != nil {
 			return &base.Response{
@@ -681,6 +698,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 		var path string
 		var query string
 		var trackID string
+
 		switch ss.state {
 		case ServerSessionStateInitial, ServerSessionStatePrePlay: // play
 			var err error
@@ -702,12 +720,15 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			query = ss.setuppedQuery
 		}
 
+		// 传输方式：TCP、UDP、UDP-Multicast
 		var transport Transport
 
 		if inTH.Protocol == headers.TransportProtocolUDP {
 			if inTH.Delivery != nil && *inTH.Delivery == headers.TransportDeliveryMulticast {
+				// UDP Multicast
 				transport = TransportUDPMulticast
 			} else {
+				// UDP Unicast
 				transport = TransportUDP
 
 				if inTH.ClientPorts == nil {
@@ -734,6 +755,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			}
 		}
 
+		// 传输协议校验
 		if ss.setuppedTransport != nil && *ss.setuppedTransport != transport {
 			return &base.Response{
 				StatusCode: base.StatusBadRequest,
@@ -762,6 +784,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			}
 		}
 
+		// 调用 OnSetup 回调
 		res, stream, err := ss.s.Handler.(ServerHandlerOnSetup).OnSetup(&ServerHandlerOnSetupCtx{
 			Session:   ss,
 			Conn:      sc,
@@ -775,6 +798,9 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 		// that makes impossible for the client to receive the response
 		// and send frames.
 		// this was causing problems during unit tests.
+		//
+		// 解决方法可防止 rtspclientsink 中的错误导致客户端无法接收响应并发送帧。
+		// 这在单元测试期间引起了问题。
 		if ua, ok := req.Header["User-Agent"]; ok && len(ua) == 1 &&
 			strings.HasPrefix(ua[0], "GStreamer") {
 			select {
@@ -807,6 +833,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			}, liberrors.ErrServerMediaAlreadySetup{}
 		}
 
+		// 设置传输协议
 		ss.setuppedTransport = &transport
 
 		if ss.state == ServerSessionStateInitial {
@@ -838,6 +865,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			res.Header = make(base.Header)
 		}
 
+		// 创建服务端 session
 		sm := newServerSessionMedia(ss, medi)
 
 		switch transport {
@@ -1012,8 +1040,14 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 		// when recording, writeBuffer is only used to send RTCP receiver reports,
 		// that are much smaller than RTP packets and are sent at a fixed interval.
 		// decrease RAM consumption by allocating less buffers.
+		//
+		// 在调用 OnRecord() 之前分配 writeBuffer。
+		// 这样就可以在回调中调用 ServerSession.WritePacket*() 。
+		// recording 时，writeBuffer 仅用于发送 RTCP 接收器报告，该报告比 RTP 数据包小得多，并且以固定间隔发送。
+		// 通过分配更少的缓冲区来减少 RAM 消耗。
 		ss.writer.allocateBuffer(8)
 
+		// 执行 OnRecord 回调
 		res, err := ss.s.Handler.(ServerHandlerOnRecord).OnRecord(&ServerHandlerOnRecordCtx{
 			Session: ss,
 			Conn:    sc,
@@ -1027,6 +1061,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 			return res, err
 		}
 
+		// 更该状态为 Record
 		ss.state = ServerSessionStateRecord
 
 		v := ss.s.timeNow().Unix()

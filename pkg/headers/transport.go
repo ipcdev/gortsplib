@@ -57,6 +57,7 @@ const (
 )
 
 // TransportMode is a transport mode.
+// 传输模式：Play or Record
 type TransportMode int
 
 const (
@@ -70,9 +71,11 @@ const (
 // Transport is a Transport header.
 type Transport struct {
 	// protocol of the stream
+	// 流的传输协议：TCP or UDP
 	Protocol TransportProtocol
 
 	// (optional) delivery method of the stream
+	//（可选）流的传递方式：单播（unicast） or 广播（Multicast）
 	Delivery *TransportDelivery
 
 	// (optional) Source IP
@@ -82,6 +85,7 @@ type Transport struct {
 	Destination *net.IP
 
 	// (optional) interleaved frame ids
+	//（可选）交错帧 ID
 	InterleavedIDs *[2]int
 
 	// (optional) TTL
@@ -100,6 +104,7 @@ type Transport struct {
 	SSRC *uint32
 
 	// (optional) mode
+	// 传输模式
 	Mode *TransportMode
 }
 
@@ -323,6 +328,13 @@ func (h Transport) Marshal() base.HeaderValue {
 type Transports []Transport
 
 // Unmarshal decodes a Transport header.
+// 解码 Transport 头
+//
+// 示例：
+//
+//		Transport: RTP/AVP/UDP;unicast;client_port=22494-22495;mode=record
+//
+//	 client_port=22494-22495 解析： 22494 为 RTP 端口、22495 为 RTCP 端口
 func (ts *Transports) Unmarshal(v base.HeaderValue) error {
 	if len(v) == 0 {
 		return fmt.Errorf("value not provided")
@@ -333,7 +345,9 @@ func (ts *Transports) Unmarshal(v base.HeaderValue) error {
 	}
 
 	v0 := v[0]
+	// 使用 , 切分
 	transports := strings.Split(v0, ",") // , separated per RFC2326 section 12.39
+
 	*ts = make([]Transport, len(transports))
 
 	for i, transport := range transports {
