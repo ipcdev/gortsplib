@@ -35,10 +35,10 @@ type sessionRequestRes struct {
 
 type sessionRequestReq struct {
 	sc     *ServerConn
-	req    *base.Request
-	id     string
-	create bool
-	res    chan sessionRequestRes
+	req    *base.Request          // RTSP 请求
+	id     string                 // Session ID
+	create bool                   // 如果在 RTSP 服务器没有找到与 id 对应的 session，是否创建新的 session。false：不创建，没有找到的话返回 454（SessionNotFound）
+	res    chan sessionRequestRes // RTSP 请求处理后的响应
 }
 
 type chGetMulticastIPReq struct {
@@ -131,7 +131,7 @@ type Server struct {
 	wg              sync.WaitGroup
 	multicastNet    *net.IPNet
 	multicastNextIP net.IP
-	tcpListener     *serverTCPListener
+	tcpListener     *serverTCPListener // 用于监听 RTSP 客户端的请求
 	udpRTPListener  *serverUDPListener
 	udpRTCPListener *serverUDPListener
 	sessions        map[string]*ServerSession
@@ -142,7 +142,7 @@ type Server struct {
 	chNewConn        chan net.Conn // 当有新的客户端连接请求时
 	chAcceptErr      chan error
 	chCloseConn      chan *ServerConn
-	chHandleRequest  chan sessionRequestReq
+	chHandleRequest  chan sessionRequestReq // 处理 ServerConn 传递过来的 RTSP 请求
 	chCloseSession   chan *ServerSession
 	chGetMulticastIP chan chGetMulticastIPReq
 }
@@ -383,6 +383,7 @@ func (s *Server) runInner() error {
 			sc.Close()
 
 		case req := <-s.chHandleRequest:
+			// 从 RTSP 服务器中查找是否有已存在的 session
 			if ss, ok := s.sessions[req.id]; ok {
 				if !req.sc.ip().Equal(ss.author.ip()) ||
 					req.sc.zone() != ss.author.zone() {
@@ -406,6 +407,7 @@ func (s *Server) runInner() error {
 					}
 				}
 			} else {
+				// 没有对应的 session 存在
 				if !req.create {
 					req.res <- sessionRequestRes{
 						res: &base.Response{
@@ -416,9 +418,11 @@ func (s *Server) runInner() error {
 					continue
 				}
 
+				// 创建新的会话
 				ss := newServerSession(s, req.sc)
 				s.sessions[ss.secretID] = ss
 
+				// 将请求交给 session 处理
 				select {
 				case ss.chHandleRequest <- req:
 				case <-ss.ctx.Done():

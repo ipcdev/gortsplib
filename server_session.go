@@ -181,17 +181,17 @@ func (s ServerSessionState) String() string {
 // ServerSession is a server-side RTSP session.
 // ServerSession 是服务器端 RTSP 会话
 type ServerSession struct {
-	s        *Server
-	secretID string // must not be shared, allows to take ownership of the session 不得共享，允许获得会话的所有权
-	author   *ServerConn
+	s        *Server     // RTSP 服务器
+	secretID string      // must not be shared, allows to take ownership of the session 不得共享，允许获得会话的所有权
+	author   *ServerConn // RTSP 连接
 
 	ctx                   context.Context
 	ctxCancel             func()
 	bytesReceived         *uint64
 	bytesSent             *uint64
 	userData              interface{}
-	conns                 map[*ServerConn]struct{}
-	state                 ServerSessionState // 会话状态
+	conns                 map[*ServerConn]struct{} // RTSP 连接
+	state                 ServerSessionState       // 会话状态
 	setuppedMedias        map[*description.Media]*serverSessionMedia
 	setuppedMediasOrdered []*serverSessionMedia
 	tcpCallbackByChannel  map[int]readFunc
@@ -208,7 +208,7 @@ type ServerSession struct {
 	timeDecoder           *rtptime.GlobalDecoder
 
 	// in
-	chHandleRequest chan sessionRequestReq
+	chHandleRequest chan sessionRequestReq // 接收 RTSP 请求
 	chRemoveConn    chan *ServerConn
 	chStartWriter   chan struct{}
 }
@@ -407,8 +407,10 @@ func (ss *ServerSession) runInner() error {
 	for {
 		select {
 		case req := <-ss.chHandleRequest:
+			// 更新请求时间
 			ss.lastRequestTime = ss.s.timeNow()
 
+			// 检查 RTSP 连接是否在
 			if _, ok := ss.conns[req.sc]; !ok {
 				ss.conns[req.sc] = struct{}{}
 			}
@@ -426,7 +428,9 @@ func (ss *ServerSession) runInner() error {
 					}
 
 					res.Header["Session"] = headers.Session{
+						// Session ID
 						Session: ss.secretID,
+						// 超时时间
 						Timeout: func() *uint {
 							// timeout controls the sending of RTCP keepalives.
 							// these are needed only when the client is playing

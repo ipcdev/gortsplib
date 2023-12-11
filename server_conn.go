@@ -63,19 +63,21 @@ type readReq struct {
 
 // ServerConn is a server-side RTSP connection.
 type ServerConn struct {
-	s     *Server
-	nconn net.Conn
+	s *Server
 
-	ctx        context.Context
-	ctxCancel  func()
-	userData   interface{}
-	remoteAddr *net.TCPAddr
-	bc         *bytecounter.ByteCounter
-	conn       *conn.Conn
-	session    *ServerSession
+	nconn      net.Conn                 // TCP 网络连接
+	remoteAddr *net.TCPAddr             // 根据 nconn 得出客户端地址
+	bc         *bytecounter.ByteCounter // 包装 nconn 计算读写字节数
+	conn       *conn.Conn               // 包装 bc 用于读写 RTSP 请求
+
+	ctx       context.Context
+	ctxCancel func()
+
+	userData interface{}
+	session  *ServerSession
 
 	// in
-	chReadRequest   chan readReq
+	chReadRequest   chan readReq // 从 conn 读取到 Request 后会写到这个 channel
 	chReadError     chan error
 	chRemoveSession chan *ServerSession
 
@@ -218,6 +220,7 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 		}, liberrors.ErrServerCSeqMissing{}
 	}
 
+	// 获取 SessionID
 	sxID := getSessionID(req.Header)
 
 	var path string
@@ -232,6 +235,7 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 			}, liberrors.ErrServerInvalidPath{}
 		}
 
+		// 获取 URL 的 Path 和 Query 部分
 		path, query = url.PathSplitQuery(pathAndQuery)
 	}
 
