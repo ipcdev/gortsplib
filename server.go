@@ -145,9 +145,9 @@ type Server struct {
 	closeError      error                    // 用于接收 runInner() 返回的错误
 
 	// in
-	chNewConn        chan net.Conn // 当有新的 RTSP 客户端连接请求时
+	chNewConn        chan net.Conn    // 当有新的 RTSP 客户端连接请求时
+	chCloseConn      chan *ServerConn // 关闭连接
 	chAcceptErr      chan error
-	chCloseConn      chan *ServerConn
 	chHandleRequest  chan sessionRequestReq // 处理 ServerConn 传递过来的 RTSP 请求
 	chCloseSession   chan *ServerSession
 	chGetMulticastIP chan chGetMulticastIPReq
@@ -383,22 +383,22 @@ func (s *Server) runInner() error {
 		case <-s.ctx.Done(): // 上下文取消
 			return liberrors.ErrServerTerminated{}
 
+		case err := <-s.chAcceptErr: // TCP Listener 发生 Accept 错误
+			return err
+
 		case nconn := <-s.chNewConn: // 有新的 RTSP 客户端请求建立 TCP 连接
 			// 封装 TCP 连接，创建 RTSP 服务端连接
 			sc := newServerConn(s, nconn)
 			s.conns[sc] = struct{}{}
 
-		case err := <-s.chAcceptErr:
-			return err
-
-		case sc := <-s.chCloseConn:
+		case sc := <-s.chCloseConn: // 关闭 ServerConn
 			if _, ok := s.conns[sc]; !ok {
 				continue
 			}
 			delete(s.conns, sc)
 			sc.Close()
 
-		case req := <-s.chHandleRequest:
+		case req := <-s.chHandleRequest: // 处理 Request（如果 session 不为空）
 			// 从 RTSP 服务器中查找是否有已存在的 session
 			if ss, ok := s.sessions[req.id]; ok {
 				if !req.sc.ip().Equal(ss.author.ip()) ||
@@ -508,17 +508,21 @@ func (s *Server) newConn(nconn net.Conn) {
 	}
 }
 
+// TCP Listener 发生 Accept 错误
 func (s *Server) acceptErr(err error) {
 	select {
-	case s.chAcceptErr <- err:
 	case <-s.ctx.Done():
+
+	case s.chAcceptErr <- err:
 	}
 }
 
+// 关闭 ServerConn
 func (s *Server) closeConn(sc *ServerConn) {
 	select {
-	case s.chCloseConn <- sc:
 	case <-s.ctx.Done():
+
+	case s.chCloseConn <- sc:
 	}
 }
 
@@ -529,6 +533,7 @@ func (s *Server) closeSession(ss *ServerSession) {
 	}
 }
 
+// Server 处理 Request（如果 session 不为空）
 func (s *Server) handleRequest(req sessionRequestReq) (*base.Response, *ServerSession, error) {
 	select {
 	case s.chHandleRequest <- req:

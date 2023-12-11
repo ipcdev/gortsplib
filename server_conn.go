@@ -439,6 +439,7 @@ func (sc *ServerConn) handleRequestOuter(req *base.Request) error {
 	return err
 }
 
+// 在会话中处理 Request
 func (sc *ServerConn) handleRequestInSession(
 	sxID string,
 	req *base.Request,

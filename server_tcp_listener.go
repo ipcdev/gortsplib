@@ -43,7 +43,7 @@ func (sl *serverTCPListener) run() {
 		// 等待 RTSP 客户端请求建立 TCP 连接
 		nconn, err := sl.ln.Accept()
 		if err != nil {
-			sl.s.acceptErr(err)
+			sl.s.acceptErr(err) // TCP Listener 发生 Accept 错误
 			return
 		}
 
