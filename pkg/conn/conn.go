@@ -14,8 +14,12 @@ const (
 
 // Conn is a RTSP connection.
 // Conn 是一个 RTSP 连接
+// (TCP 连接) --> (bytecounter.ByteCounter) --> (conn.Conn.w)
+//   - TCP 连接     负责读写数据
+//   - ByteCounter 负责收发的字节数统计
+//   - Conn        解析数据是 request、response、还是 interleaved frame
 type Conn struct {
-	w  io.Writer
+	w  io.Writer // (TCP 连接) --封装--> (bytecounter.ByteCounter) --封装--> (conn.Conn.w)
 	br *bufio.Reader
 
 	// reuse interleaved frames. they should never be passed to secondary routines
@@ -37,14 +41,17 @@ func (c *Conn) Read() (interface{}, error) {
 		return nil, err
 	}
 
+	// 读取 Interleaved Frame
 	if byts[0] == base.InterleavedFrameMagicByte {
 		return c.ReadInterleavedFrame()
 	}
 
+	// 读取响应
 	if byts[0] == 'R' && byts[1] == 'T' {
 		return c.ReadResponse()
 	}
 
+	// 读取请求
 	return c.ReadRequest()
 }
 

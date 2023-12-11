@@ -9,6 +9,7 @@ import (
 type ServerHandler interface{}
 
 // ServerHandlerOnConnOpenCtx is the context of OnConnOpen.
+// OnConnOpen 的上下文
 type ServerHandlerOnConnOpenCtx struct {
 	Conn *ServerConn
 }
@@ -20,6 +21,7 @@ type ServerHandlerOnConnOpen interface {
 }
 
 // ServerHandlerOnConnCloseCtx is the context of OnConnClose.
+// OnConnClose 的上下文
 type ServerHandlerOnConnCloseCtx struct {
 	Conn  *ServerConn
 	Error error

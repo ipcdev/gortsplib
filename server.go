@@ -102,6 +102,9 @@ type Server struct {
 	//
 	// an handler to handle server events.
 	// It may implement one or more of the ServerHandler* interfaces.
+	//
+	// 处理 服务器 事件
+	// 可以实现一个或多个 ServerHandler* 接口
 	Handler ServerHandler
 
 	//
@@ -109,11 +112,14 @@ type Server struct {
 	//
 	// function used to initialize the TCP listener.
 	// It defaults to net.Listen.
+	//
 	// 用于初始化 TCP listener 的函数。
 	// 默认是 net.Listen。
 	Listen func(network string, address string) (net.Listener, error)
 	// function used to initialize UDP listeners.
 	// It defaults to net.ListenPacket.
+	//
+	// 用于初始化 UDP listeners
 	ListenPacket func(network, address string) (net.PacketConn, error)
 
 	//
@@ -135,11 +141,11 @@ type Server struct {
 	udpRTPListener  *serverUDPListener
 	udpRTCPListener *serverUDPListener
 	sessions        map[string]*ServerSession
-	conns           map[*ServerConn]struct{}
-	closeError      error
+	conns           map[*ServerConn]struct{} // 保存 RTSP 客户端与服务端建立的连接
+	closeError      error                    // 用于接收 runInner() 返回的错误
 
 	// in
-	chNewConn        chan net.Conn // 当有新的客户端连接请求时
+	chNewConn        chan net.Conn // 当有新的 RTSP 客户端连接请求时
 	chAcceptErr      chan error
 	chCloseConn      chan *ServerConn
 	chHandleRequest  chan sessionRequestReq // 处理 ServerConn 传递过来的 RTSP 请求
@@ -319,9 +325,11 @@ func (s *Server) Start() error {
 	s.tcpListener, err = newServerTCPListener(s) // 创建服务端 TCP Listener
 	if err != nil {
 		if s.udpRTPListener != nil {
+			// 关闭 udp RTP listener
 			s.udpRTPListener.close()
 		}
 		if s.udpRTCPListener != nil {
+			// 关闭 udp RTCP listener
 			s.udpRTCPListener.close()
 		}
 		s.ctxCancel()
@@ -350,30 +358,38 @@ func (s *Server) Wait() error {
 func (s *Server) run() {
 	defer s.wg.Done()
 
+	// 阻塞，直到 runInner() 有错误返回
 	s.closeError = s.runInner()
 
 	s.ctxCancel()
 
 	if s.udpRTCPListener != nil {
+		// 关闭 UDP RTCP Listener
 		s.udpRTCPListener.close()
 	}
 
 	if s.udpRTPListener != nil {
+		// 关闭 UDP RTP Listener
 		s.udpRTPListener.close()
 	}
 
+	// 关闭 TCP Listener
 	s.tcpListener.close()
 }
 
 func (s *Server) runInner() error {
 	for {
 		select {
-		case err := <-s.chAcceptErr:
-			return err
+		case <-s.ctx.Done(): // 上下文取消
+			return liberrors.ErrServerTerminated{}
 
-		case nconn := <-s.chNewConn:
+		case nconn := <-s.chNewConn: // 有新的 RTSP 客户端请求建立 TCP 连接
+			// 封装 TCP 连接，创建 RTSP 服务端连接
 			sc := newServerConn(s, nconn)
 			s.conns[sc] = struct{}{}
+
+		case err := <-s.chAcceptErr:
+			return err
 
 		case sc := <-s.chCloseConn:
 			if _, ok := s.conns[sc]; !ok {
@@ -456,8 +472,6 @@ func (s *Server) runInner() error {
 			s.multicastNextIP = ip
 			req.res <- ip
 
-		case <-s.ctx.Done():
-			return liberrors.ErrServerTerminated{}
 		}
 	}
 }
@@ -485,9 +499,12 @@ func (s *Server) getMulticastIP() (net.IP, error) {
 
 func (s *Server) newConn(nconn net.Conn) {
 	select {
-	case s.chNewConn <- nconn:
 	case <-s.ctx.Done():
+		// 上下文取消，关闭网络连接
 		nconn.Close()
+
+	case s.chNewConn <- nconn:
+		// 交给 rtsp 服务器处理这个新的 RTSP 客户端 TCP 连接
 	}
 }
 

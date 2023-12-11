@@ -57,28 +57,29 @@ func serverSideDescription(d *description.Session, contentBase *url.URL) *descri
 }
 
 type readReq struct {
-	req *base.Request
-	res chan error
+	req *base.Request // RTSP 请求
+	res chan error    // 阻塞等待服务器处理完 RTSP 请求。发生错误则写入 error；无错误发生则将响应写入 TCP 网络连接
 }
 
 // ServerConn is a server-side RTSP connection.
+// 包装客户端与服务端之间的 TCP 连接，进行网络数据的收发、统计、解析
 type ServerConn struct {
-	s *Server
+	s *Server // RTSP 服务器
 
 	nconn      net.Conn                 // TCP 网络连接
 	remoteAddr *net.TCPAddr             // 根据 nconn 得出客户端地址
-	bc         *bytecounter.ByteCounter // 包装 nconn 计算读写字节数
+	bc         *bytecounter.ByteCounter // 包装 nconn（TCP连接） 并添加计算读写字节数的能力
 	conn       *conn.Conn               // 包装 bc 用于读写 RTSP 请求
 
 	ctx       context.Context
 	ctxCancel func()
 
-	userData interface{}
+	userData interface{} // 与连接关联的用户数据
 	session  *ServerSession
 
 	// in
-	chReadRequest   chan readReq // 从 conn 读取到 Request 后会写到这个 channel
-	chReadError     chan error
+	chReadRequest   chan readReq // 从 tcp 连接中读取到 Request 后会写到这个 channel
+	chReadError     chan error   // 从网络连接中读取数据发生错误
 	chRemoveSession chan *ServerSession
 
 	// out
@@ -116,35 +117,42 @@ func newServerConn(
 }
 
 // Close closes the ServerConn.
+// 关闭 ServerConn
 func (sc *ServerConn) Close() {
 	sc.ctxCancel()
 }
 
 // NetConn returns the underlying net.Conn.
+// 返回底层 TCP 连接
 func (sc *ServerConn) NetConn() net.Conn {
 	return sc.nconn
 }
 
 // BytesReceived returns the number of read bytes.
+// 返回 RTSP 服务器读取到的字节数
 func (sc *ServerConn) BytesReceived() uint64 {
 	return sc.bc.BytesReceived()
 }
 
 // BytesSent returns the number of written bytes.
+// 返回 RTSP 服务器发送出去的字节数
 func (sc *ServerConn) BytesSent() uint64 {
 	return sc.bc.BytesSent()
 }
 
 // SetUserData sets some user data associated to the connection.
+// 设置与连接关联的一些用户数据。
 func (sc *ServerConn) SetUserData(v interface{}) {
 	sc.userData = v
 }
 
 // UserData returns some user data associated to the connection.
+// 返回与连接关联的一些用户数据。
 func (sc *ServerConn) UserData() interface{} {
 	return sc.userData
 }
 
+// 返回 RTSP 客户端 IP
 func (sc *ServerConn) ip() net.IP {
 	return sc.remoteAddr.IP
 }
@@ -172,8 +180,10 @@ func (sc *ServerConn) run() {
 
 	err := sc.runInner()
 
+	// 上下文取消
 	sc.ctxCancel()
 
+	// 关闭 TCP 连接
 	sc.nconn.Close()
 
 	cr.wait()
@@ -184,6 +194,7 @@ func (sc *ServerConn) run() {
 
 	sc.s.closeConn(sc)
 
+	// 判断 Server.Handler 是否实现了 ServerHandlerOnConnClose 接口，执行 OnConnClose() 回调
 	if h, ok := sc.s.Handler.(ServerHandlerOnConnClose); ok {
 		h.OnConnClose(&ServerHandlerOnConnCloseCtx{
 			Conn:  sc,
@@ -195,19 +206,20 @@ func (sc *ServerConn) run() {
 func (sc *ServerConn) runInner() error {
 	for {
 		select {
-		case req := <-sc.chReadRequest:
+		case <-sc.ctx.Done(): // 上下文取消
+			return liberrors.ErrServerTerminated{}
+
+		case req := <-sc.chReadRequest: // 读取到 request
+			// 阻塞等待处理完 RTSP 请求
 			req.res <- sc.handleRequestOuter(req.req)
 
-		case err := <-sc.chReadError:
+		case err := <-sc.chReadError: // 读取发生错误
 			return err
 
 		case ss := <-sc.chRemoveSession:
 			if sc.session == ss {
 				sc.session = nil
 			}
-
-		case <-sc.ctx.Done():
-			return liberrors.ErrServerTerminated{}
 		}
 	}
 }
@@ -385,11 +397,14 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 	}, nil
 }
 
+// handleRequestOuter -> handleRequestInner
 func (sc *ServerConn) handleRequestOuter(req *base.Request) error {
+	// 执行 Handler OnRequest 回调函数
 	if h, ok := sc.s.Handler.(ServerHandlerOnRequest); ok {
 		h.OnRequest(sc, req)
 	}
 
+	// 内部处理 request
 	res, err := sc.handleRequestInner(req)
 
 	if res.Header == nil {
@@ -397,18 +412,24 @@ func (sc *ServerConn) handleRequestOuter(req *base.Request) error {
 	}
 
 	// add cseq
+	// 添加 CSeq Header
 	if _, ok := err.(liberrors.ErrServerCSeqMissing); !ok {
 		res.Header["CSeq"] = req.Header["CSeq"]
 	}
 
 	// add server
+	// 添加 Server Header
 	res.Header["Server"] = base.HeaderValue{"gortsplib"}
 
+	// 执行 Handler OnResponse 回调函数
 	if h, ok := sc.s.Handler.(ServerHandlerOnResponse); ok {
 		h.OnResponse(sc, res)
 	}
 
+	// 设置写截止时间
 	sc.nconn.SetWriteDeadline(time.Now().Add(sc.s.WriteTimeout))
+
+	// 将响应写入网络连接
 	err2 := sc.conn.WriteResponse(res)
 	if err == nil && err2 != nil {
 		err = err2
@@ -478,19 +499,25 @@ func (sc *ServerConn) removeSession(ss *ServerSession) {
 	}
 }
 
+// 读取到 request
 func (sc *ServerConn) readRequest(req readReq) error {
 	select {
-	case sc.chReadRequest <- req:
+	case <-sc.ctx.Done(): // 上下文取消
+		return liberrors.ErrServerTerminated{}
+
+	case sc.chReadRequest <- req: // 从 tcp 连接中读取到 request
+		// 阻塞等待响应
 		return <-req.res
 
-	case <-sc.ctx.Done():
-		return liberrors.ErrServerTerminated{}
 	}
 }
 
+// 读取发生错误
 func (sc *ServerConn) readError(err error) {
 	select {
-	case sc.chReadError <- err:
-	case <-sc.ctx.Done():
+	case <-sc.ctx.Done(): // 上下文取消
+
+	case sc.chReadError <- err: // 从 tcp 连接中读取数据发生错误
+
 	}
 }
