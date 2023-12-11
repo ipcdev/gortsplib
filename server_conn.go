@@ -79,7 +79,7 @@ type ServerConn struct {
 
 	// in
 	chReadRequest   chan readReq // 从 tcp 连接中读取到 Request 后会写到这个 channel
-	chReadError     chan error   // 从网络连接中读取数据发生错误
+	chReadError     chan error   // serverConnReader 从网络连接中读取数据发生错误
 	chRemoveSession chan *ServerSession
 
 	// out
@@ -175,10 +175,10 @@ func (sc *ServerConn) run() {
 	// 创建 RTSP 连接
 	sc.conn = conn.NewConn(sc.bc)
 
-	// 创建 ServerConnReader
+	// 创建 serverConnReader
 	cr := newServerConnReader(sc)
 
-	err := sc.runInner()
+	err := sc.runInner() // 阻塞运行
 
 	// 上下文取消
 	sc.ctxCancel()
@@ -186,12 +186,13 @@ func (sc *ServerConn) run() {
 	// 关闭 TCP 连接
 	sc.nconn.Close()
 
-	cr.wait()
+	cr.wait() // 等待 serverConnReader 退出
 
 	if sc.session != nil {
 		sc.session.removeConn(sc)
 	}
 
+	// 关闭 ServerConn
 	sc.s.closeConn(sc)
 
 	// 判断 Server.Handler 是否实现了 ServerHandlerOnConnClose 接口，执行 OnConnClose() 回调
@@ -209,12 +210,12 @@ func (sc *ServerConn) runInner() error {
 		case <-sc.ctx.Done(): // 上下文取消
 			return liberrors.ErrServerTerminated{}
 
+		case err := <-sc.chReadError: // 读取发生错误（serverConnReader）
+			return err
+
 		case req := <-sc.chReadRequest: // 读取到 request
 			// 阻塞等待处理完 RTSP 请求
 			req.res <- sc.handleRequestOuter(req.req)
-
-		case err := <-sc.chReadError: // 读取发生错误
-			return err
 
 		case ss := <-sc.chRemoveSession:
 			if sc.session == ss {
@@ -512,7 +513,7 @@ func (sc *ServerConn) readRequest(req readReq) error {
 	}
 }
 
-// 读取发生错误
+// 读取发生错误 (serverConnReader 调用)
 func (sc *ServerConn) readError(err error) {
 	select {
 	case <-sc.ctx.Done(): // 上下文取消

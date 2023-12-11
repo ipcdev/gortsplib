@@ -322,7 +322,7 @@ func (s *Server) Start() error {
 	s.chGetMulticastIP = make(chan chGetMulticastIPReq)
 
 	var err error
-	s.tcpListener, err = newServerTCPListener(s) // 创建服务端 TCP Listener
+	s.tcpListener, err = newServerTCPListener(s) // 创建服务端 TCP Listener，等待 RTSP 客户端建立网络连接
 	if err != nil {
 		if s.udpRTPListener != nil {
 			// 关闭 udp RTP listener
