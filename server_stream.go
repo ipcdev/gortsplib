@@ -27,19 +27,26 @@ func firstFormat(formats map[uint8]*serverStreamFormat) *serverStreamFormat {
 // - distributing the stream to each reader
 // - allocating multicast listeners
 // - gathering infos about the stream in order to generate SSRC and RTP-Info
+//
+// ServerStream 代表一个数据流。
+// 负责：
+//   - 将 stream 分发给每个 reader
+//   - 分配 多播 listeners
+//   - 收集有关流的信息以生成 SSRC 和 RTP-Info
 type ServerStream struct {
-	s    *Server
-	desc *description.Session
+	s    *Server              // RTSP 服务器
+	desc *description.Session // RTSP 流的描述
 
 	mutex                sync.RWMutex
 	readers              map[*ServerSession]struct{}
 	multicastReaderCount int
-	activeUnicastReaders map[*ServerSession]struct{}
+	activeUnicastReaders map[*ServerSession]struct{} // 活跃的 单播 reader
 	streamMedias         map[*description.Media]*serverStreamMedia
-	closed               bool
+	closed               bool // RTSP 流是否关闭
 }
 
 // NewServerStream allocates a ServerStream.
+// 创建一个 RTSP 流
 func NewServerStream(s *Server, desc *description.Session) *ServerStream {
 	st := &ServerStream{
 		s:                    s,
@@ -48,8 +55,11 @@ func NewServerStream(s *Server, desc *description.Session) *ServerStream {
 		activeUnicastReaders: make(map[*ServerSession]struct{}),
 	}
 
+	// 初始化 map
 	st.streamMedias = make(map[*description.Media]*serverStreamMedia, len(desc.Medias))
+
 	for i, medi := range desc.Medias {
+		// 创建 streamMedia
 		st.streamMedias[medi] = newServerStreamMedia(st, medi, i)
 	}
 
@@ -263,7 +273,9 @@ func (st *ServerStream) WritePacketRTPWithNTP(medi *description.Media, pkt *rtp.
 }
 
 // WritePacketRTCP writes a RTCP packet to all the readers of the stream.
+// 发送一个 RTCP 包给 RTSP 流的所有 reader
 func (st *ServerStream) WritePacketRTCP(medi *description.Media, pkt rtcp.Packet) error {
+	// RTCP 包序列化为字节数组
 	byts, err := pkt.Marshal()
 	if err != nil {
 		return err
@@ -272,6 +284,7 @@ func (st *ServerStream) WritePacketRTCP(medi *description.Media, pkt rtcp.Packet
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
 
+	// 检查 RTSP 流是否关闭
 	if st.closed {
 		return liberrors.ErrServerStreamClosed{}
 	}

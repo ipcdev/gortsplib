@@ -72,9 +72,9 @@ type ServerHandlerOnResponse interface {
 // ServerHandlerOnDescribeCtx is the context of OnDescribe.
 type ServerHandlerOnDescribeCtx struct {
 	Conn    *ServerConn
-	Request *base.Request
-	Path    string
-	Query   string
+	Request *base.Request // DESCRIBE 请求
+	Path    string        // DESCRIBE 请求中 URL 的 Path 部分
+	Query   string        // DESCRIBE 请求中 URL 的 Query 部分
 }
 
 // ServerHandlerOnDescribe can be implemented by a ServerHandler.

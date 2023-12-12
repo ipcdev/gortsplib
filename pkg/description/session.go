@@ -42,6 +42,9 @@ type SessionFECGroup []string
 
 // Session is the description of a RTSP stream.
 // Session 是一个 RTSP 流的描述
+//
+// 一个 RTSP 流有一个 URL，
+// 一个 RTSP 流内包含多个 "媒体流" （Audio/Video）
 type Session struct {
 	// Base URL of the stream (read only).
 	BaseURL *url.URL
@@ -59,6 +62,9 @@ type Session struct {
 
 // FindFormat finds a certain format among all the formats in all the medias of the stream.
 // If the format is found, it is inserted into forma, and its media is returned.
+//
+// 在 RTSP 流的所有 medias 的所有 formats 中查找某种 format。
+// 如果找到该格式，并返回其媒体。
 func (d *Session) FindFormat(forma interface{}) *Media {
 	for _, media := range d.Medias {
 		ok := media.FindFormat(forma)
@@ -70,6 +76,7 @@ func (d *Session) FindFormat(forma interface{}) *Media {
 }
 
 // Unmarshal decodes the description from SDP.
+// 从 SDP Session 描述中解码得到 Session
 func (d *Session) Unmarshal(ssd *sdp.SessionDescription) error {
 	// 会话名
 	d.Title = string(ssd.SessionName)
@@ -115,6 +122,7 @@ func (d *Session) Unmarshal(ssd *sdp.SessionDescription) error {
 }
 
 // Marshal encodes the description in SDP.
+// 编码 RTSP 流描述为 SDP 格式。
 func (d Session) Marshal(multicast bool) ([]byte, error) {
 	var sessionName psdp.SessionName
 	if d.Title != "" {

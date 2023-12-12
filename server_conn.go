@@ -25,6 +25,8 @@ func getSessionID(header base.Header) string {
 	return ""
 }
 
+// 服务端返回 RTSP 流的描述
+// 返回 Title、FECGroups、Medias
 func serverSideDescription(d *description.Session, contentBase *url.URL) *description.Session {
 	out := &description.Session{
 		Title:     d.Title,
@@ -74,8 +76,8 @@ type ServerConn struct {
 	ctx       context.Context
 	ctxCancel func()
 
-	userData interface{} // 与连接关联的用户数据
-	session  *ServerSession
+	userData interface{}    // 与连接关联的用户数据
+	session  *ServerSession // handleRequestInSession() 中初始化 session（如果 session 为 nil）
 
 	// in
 	chReadRequest   chan readReq // 从 tcp 连接中读取到 Request 后会写到这个 channel
@@ -233,12 +235,15 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 		}, liberrors.ErrServerCSeqMissing{}
 	}
 
-	// 获取 SessionID
+	// 从 RTSP 请求中查找 Session 头，以获取 SessionID。
+	// 如果未找到，返回的是 ""
 	sxID := getSessionID(req.Header)
 
 	var path string
 	var query string
 
+	// 如果请求方法为 DESCRIBE、GET_PARAMETER、SET_PARAMETER
+	// 则获取请求 URL 的 path 和 query 部分
 	switch req.Method {
 	case base.Describe, base.GetParameter, base.SetParameter:
 		pathAndQuery, ok := req.URL.RTSPPathAndQuery()
@@ -254,11 +259,17 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 
 	switch req.Method {
 	case base.Options:
+		// OPTIONS 方法
+		// 在返回的响应 Header 部分的 Public 字段 中告知客户端，该 RTSP 服务器支持哪些请求方法
+
 		if sxID != "" {
 			return sc.handleRequestInSession(sxID, req, false)
 		}
 
+		// 检查 RTSP 服务器的 Handler 实现了哪些接口（即支持哪些方法）
+		// 默认支持的方法为：GET_PARAMETER、TEARDOWN
 		var methods []string
+
 		if _, ok := sc.s.Handler.(ServerHandlerOnDescribe); ok {
 			methods = append(methods, string(base.Describe))
 		}
@@ -277,10 +288,13 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 		if _, ok := sc.s.Handler.(ServerHandlerOnPause); ok {
 			methods = append(methods, string(base.Pause))
 		}
+
 		methods = append(methods, string(base.GetParameter))
+
 		if _, ok := sc.s.Handler.(ServerHandlerOnSetParameter); ok {
 			methods = append(methods, string(base.SetParameter))
 		}
+
 		methods = append(methods, string(base.Teardown))
 
 		return &base.Response{
@@ -291,7 +305,12 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 		}, nil
 
 	case base.Describe:
+		// DESCRIBE 方法
+		// 获取 RTSP 流的 SDP
+
+		// 检查 RTSP 服务器是否实现了 DESCRIBE 请求方法
 		if h, ok := sc.s.Handler.(ServerHandlerOnDescribe); ok {
+			// mediamtx 实现 OnDescribe 方法
 			res, stream, err := h.OnDescribe(&ServerHandlerOnDescribeCtx{
 				Conn:    sc,
 				Request: req,
@@ -299,7 +318,9 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 				Query:   query,
 			})
 
+			// OnDescribe 返回状态码为 200
 			if res.StatusCode == base.StatusOK {
+				// Response 中添加 Header
 				if res.Header == nil {
 					res.Header = make(base.Header)
 				}
@@ -320,6 +341,7 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 				}
 
 				if stream != nil {
+					// 获取 RTSP 流的 SDP，作为 DESCRIBE 响应的 Body 部分
 					byts, _ := serverSideDescription(stream.desc, req.URL).Marshal(multicast)
 					res.Body = byts
 				}
@@ -328,21 +350,35 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 			return res, err
 		}
 
-	case base.Announce:
-		if _, ok := sc.s.Handler.(ServerHandlerOnAnnounce); ok {
-			return sc.handleRequestInSession(sxID, req, true)
-		}
-
 	case base.Setup:
+		// SETUP 方法
+		//
+
 		if _, ok := sc.s.Handler.(ServerHandlerOnSetup); ok {
 			return sc.handleRequestInSession(sxID, req, true)
 		}
 
 	case base.Play:
+		// PLAY 方法
+		//
+
 		if sxID != "" {
 			if _, ok := sc.s.Handler.(ServerHandlerOnPlay); ok {
 				return sc.handleRequestInSession(sxID, req, false)
 			}
+		}
+
+	case base.Teardown:
+		// TEARDOWN 方法
+		//
+
+		if sxID != "" {
+			return sc.handleRequestInSession(sxID, req, false)
+		}
+
+	case base.Announce:
+		if _, ok := sc.s.Handler.(ServerHandlerOnAnnounce); ok {
+			return sc.handleRequestInSession(sxID, req, true)
 		}
 
 	case base.Record:
@@ -357,11 +393,6 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 			if _, ok := sc.s.Handler.(ServerHandlerOnPause); ok {
 				return sc.handleRequestInSession(sxID, req, false)
 			}
-		}
-
-	case base.Teardown:
-		if sxID != "" {
-			return sc.handleRequestInSession(sxID, req, false)
 		}
 
 	case base.GetParameter:
@@ -445,7 +476,7 @@ func (sc *ServerConn) handleRequestInSession(
 	req *base.Request,
 	create bool,
 ) (*base.Response, error) {
-	// handle directly in Session
+	// handle directly in Session（直接在 Session 处理）
 	if sc.session != nil {
 		// session ID is optional in SETUP and ANNOUNCE requests, since
 		// client may not have received the session ID yet due to multiple reasons:
@@ -479,7 +510,8 @@ func (sc *ServerConn) handleRequestInSession(
 		return res, err
 	}
 
-	// otherwise, pass through Server
+	// otherwise, pass through Server （否则，通过服务器）
+	// session 为 nil 的情况
 	cres := make(chan sessionRequestRes)
 	sreq := sessionRequestReq{
 		sc:     sc,
@@ -491,6 +523,7 @@ func (sc *ServerConn) handleRequestInSession(
 
 	res, session, err := sc.s.handleRequest(sreq)
 	sc.session = session
+
 	return res, err
 }
 

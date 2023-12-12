@@ -150,6 +150,12 @@ func generateRTPInfo(
 }
 
 // ServerSessionState is a state of a ServerSession.
+// Session 的状态：
+//   - Initial
+//   - PrePlay
+//   - Play
+//   - PreRecord
+//   - Record
 type ServerSessionState int
 
 // states.
@@ -183,7 +189,7 @@ func (s ServerSessionState) String() string {
 type ServerSession struct {
 	s        *Server     // RTSP 服务器
 	secretID string      // must not be shared, allows to take ownership of the session 不得共享，允许获得会话的所有权
-	author   *ServerConn // RTSP 连接
+	author   *ServerConn // RTSP 客户端与服务端之间的连接
 
 	ctx                   context.Context
 	ctxCancel             func()
@@ -199,7 +205,7 @@ type ServerSession struct {
 	setuppedStream        *ServerStream // read
 	setuppedPath          string        // RTSP URL Path 部分 (Announce 请求设置)
 	setuppedQuery         string        // RTSP URL Query 部分 (Announce 请求设置)
-	lastRequestTime       time.Time     // 上一个客户端请求的时间
+	lastRequestTime       time.Time     // 最后一个客户端请求的时间
 	tcpConn               *ServerConn
 	announcedDesc         *description.Session // publish  从 announce 请求体 SDP 中解析得到的 RTSP 描述 (Announce 请求设置)
 	udpLastPacketTime     *int64               // publish  udp最后一个包的时间
@@ -213,13 +219,19 @@ type ServerSession struct {
 	chStartWriter   chan struct{}
 }
 
+// 创建客户端与服务端之间的会话
+// 参数：
+//   - s       RTSP 服务器
+//   - author  客户端与服务端之间的网络连接
 func newServerSession(
 	s *Server,
 	author *ServerConn,
 ) *ServerSession {
+
 	ctx, ctxCancel := context.WithCancel(s.ctx)
 
 	// use an UUID without dashes, since dashes confuse some clients.
+	// 使用不带 - 的 UUID，因为 - 会让某些客户端感到困惑。
 	secretID := strings.ReplaceAll(uuid.New().String(), "-", "")
 
 	ss := &ServerSession{
@@ -245,6 +257,7 @@ func newServerSession(
 }
 
 // Close closes the ServerSession.
+// 关闭 session
 func (ss *ServerSession) Close() {
 	ss.ctxCancel()
 }
@@ -299,11 +312,13 @@ func (ss *ServerSession) SetuppedMedias() []*description.Media {
 }
 
 // SetUserData sets some user data associated to the session.
+// 设置一些与会话关联的 用户数据
 func (ss *ServerSession) SetUserData(v interface{}) {
 	ss.userData = v
 }
 
 // UserData returns some user data associated to the session.
+// 获取与会话关联的 用户数据
 func (ss *ServerSession) UserData() interface{} {
 	return ss.userData
 }
@@ -359,6 +374,7 @@ func (ss *ServerSession) checkState(allowed map[ServerSessionState]struct{}) err
 func (ss *ServerSession) run() {
 	defer ss.s.wg.Done()
 
+	// 执行 OnSessionOpen() 回调
 	if h, ok := ss.s.Handler.(ServerHandlerOnSessionOpen); ok {
 		h.OnSessionOpen(&ServerHandlerOnSessionOpenCtx{
 			Session: ss,

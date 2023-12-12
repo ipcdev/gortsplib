@@ -95,6 +95,7 @@ type Server struct {
 	// It defaults to 1472.
 	MaxPacketSize int
 	// disable automatic RTCP sender reports.
+	// 禁用自动 RTCP sender 报告。
 	DisableRTCPSenderReports bool
 
 	//
@@ -127,7 +128,7 @@ type Server struct {
 	//
 
 	timeNow              func() time.Time // 获取当前时间函数
-	senderReportPeriod   time.Duration
+	senderReportPeriod   time.Duration    // 默认 10s，且未发现配置该值的地方。用于 rtcpSender。
 	receiverReportPeriod time.Duration
 	sessionTimeout       time.Duration
 	checkStreamPeriod    time.Duration
@@ -140,9 +141,9 @@ type Server struct {
 	tcpListener     *serverTCPListener // 用于监听 RTSP 客户端的请求
 	udpRTPListener  *serverUDPListener
 	udpRTCPListener *serverUDPListener
-	sessions        map[string]*ServerSession
-	conns           map[*ServerConn]struct{} // 保存 RTSP 客户端与服务端建立的连接
-	closeError      error                    // 用于接收 runInner() 返回的错误
+	sessions        map[string]*ServerSession // 保存客户端与服务端之间的 session。 key：SessionID;  value: session
+	conns           map[*ServerConn]struct{}  // 保存 RTSP 客户端与服务端建立的连接
+	closeError      error                     // 用于接收 runInner() 返回的错误
 
 	// in
 	chNewConn        chan net.Conn    // 当有新的 RTSP 客户端连接请求时
@@ -401,6 +402,8 @@ func (s *Server) runInner() error {
 		case req := <-s.chHandleRequest: // 处理 Request（如果 session 不为空）
 			// 从 RTSP 服务器中查找是否有已存在的 session
 			if ss, ok := s.sessions[req.id]; ok {
+				// RTSP 服务器中有对应的 session 存在
+
 				if !req.sc.ip().Equal(ss.author.ip()) ||
 					req.sc.zone() != ss.author.zone() {
 					req.res <- sessionRequestRes{
@@ -423,8 +426,11 @@ func (s *Server) runInner() error {
 					}
 				}
 			} else {
-				// 没有对应的 session 存在
+				// 没有 SessionID 对应的 session 存在
+
 				if !req.create {
+					// 服务端没有查找到与 SessionID 对应的 session，且不创建 session，返回 NotFound 错误
+
 					req.res <- sessionRequestRes{
 						res: &base.Response{
 							StatusCode: base.StatusSessionNotFound,
@@ -438,7 +444,7 @@ func (s *Server) runInner() error {
 				ss := newServerSession(s, req.sc)
 				s.sessions[ss.secretID] = ss
 
-				// 将请求交给 session 处理
+				// 会话创建完车，再次将请求交给 session 处理
 				select {
 				case ss.chHandleRequest <- req:
 				case <-ss.ctx.Done():
@@ -533,16 +539,17 @@ func (s *Server) closeSession(ss *ServerSession) {
 	}
 }
 
-// Server 处理 Request（如果 session 不为空）
+// Server 处理 Request
 func (s *Server) handleRequest(req sessionRequestReq) (*base.Response, *ServerSession, error) {
 	select {
-	case s.chHandleRequest <- req:
-		res := <-req.res
-		return res.res, res.ss, res.err
-
-	case <-s.ctx.Done():
+	case <-s.ctx.Done(): // 上下文取消
 		return &base.Response{
 			StatusCode: base.StatusBadRequest,
 		}, req.sc.session, liberrors.ErrServerTerminated{}
+
+	case s.chHandleRequest <- req: // 交给 RTSP 服务器处理 Request
+		res := <-req.res
+		return res.res, res.ss, res.err
+
 	}
 }

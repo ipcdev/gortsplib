@@ -11,8 +11,8 @@ import (
 )
 
 type serverStreamFormat struct {
-	sm         *serverStreamMedia
-	format     format.Format
+	sm         *serverStreamMedia // RTSP 流内的一个 media
+	format     format.Format      // media 负载的格式
 	rtcpSender *rtcpsender.RTCPSender
 }
 
@@ -22,12 +22,14 @@ func newServerStreamFormat(sm *serverStreamMedia, forma format.Format) *serverSt
 		format: forma,
 	}
 
+	// 创建 RTCP Sender
 	sf.rtcpSender = rtcpsender.New(
 		forma.ClockRate(),
 		sm.st.s.senderReportPeriod,
 		sm.st.s.timeNow,
 		func(pkt rtcp.Packet) {
 			if !sm.st.s.DisableRTCPSenderReports {
+				// DisableRTCPSenderReports：false （既启用 RTCP Sender 发送 Report）
 				sm.st.WritePacketRTCP(sm.media, pkt) //nolint:errcheck
 			}
 		},

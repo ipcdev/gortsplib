@@ -5,13 +5,18 @@ import (
 )
 
 type serverStreamMedia struct {
-	st              *ServerStream
-	media           *description.Media
-	trackID         int
-	formats         map[uint8]*serverStreamFormat
+	st              *ServerStream                 // RTSP 流
+	media           *description.Media            // RTSP 流内的一个 media
+	trackID         int                           // media 对应的轨道 ID
+	formats         map[uint8]*serverStreamFormat // media 负载的格式（key：负载类型    value：Format）
 	multicastWriter *serverMulticastWriter
 }
 
+// 创建 serverStreamMedia
+// 参数：
+//   - st       ServerStream 代表一条 RTSP 流
+//   - medi     代表 RTSP 流内的一个媒体
+//   - trackID  轨道 ID 号
 func newServerStreamMedia(st *ServerStream, medi *description.Media, trackID int) *serverStreamMedia {
 	sm := &serverStreamMedia{
 		st:      st,
@@ -41,6 +46,7 @@ func (sm *serverStreamMedia) close() {
 	}
 }
 
+// 发送一个 RTCP 包给 RTSP 流的所有 reader
 func (sm *serverStreamMedia) writePacketRTCP(byts []byte) error {
 	// send unicast
 	for r := range sm.st.activeUnicastReaders {

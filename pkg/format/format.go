@@ -7,7 +7,9 @@ import (
 	"github.com/pion/rtp"
 )
 
+// 解析 rtpMap，获取 Codec 与 Clock
 func getCodecAndClock(rtpMap string) (string, string) {
+	// 使用 / 将 rtpMap 切分为两部分
 	parts2 := strings.SplitN(rtpMap, "/", 2)
 	if len(parts2) != 2 {
 		return "", ""
@@ -16,13 +18,14 @@ func getCodecAndClock(rtpMap string) (string, string) {
 	return strings.ToLower(parts2[0]), parts2[1]
 }
 
+// 反序列化上下文
 type unmarshalContext struct {
-	mediaType   string
-	payloadType uint8
-	clock       string
-	codec       string
-	rtpMap      string
-	fmtp        map[string]string
+	mediaType   string            // 媒体类型（例如 video）
+	payloadType uint8             // 负载类型（例如 96）
+	clock       string            // clock（从 rtpMap 解析得到， 例如 H264）
+	codec       string            // codec（从 rtpMap 解析得到， 例如 90000）
+	rtpMap      string            // rtpMap（例如 H264/90000）
+	fmtp        map[string]string // fmtp
 }
 
 // Format is a media format.
@@ -52,9 +55,18 @@ type Format interface {
 }
 
 // Unmarshal decodes a format from a media description.
+// 从 media 描述中解码一个 Format
+//
+// 参数：
+//   - mediaType    媒体类型 （audio/video/application）
+//   - payloadType  媒体负载类型
+//   - rtpMap       包含 Codec 与 Clock 信息
+//   - fmtp
 func Unmarshal(mediaType string, payloadType uint8, rtpMap string, fmtp map[string]string) (Format, error) {
+	// 解析 rtpMap 获取 Codec 与 Clock
 	codec, clock := getCodecAndClock(rtpMap)
 
+	// 根据 codec、clock 返回对应的 Format
 	format := func() Format {
 		switch {
 		// video
@@ -129,6 +141,7 @@ func Unmarshal(mediaType string, payloadType uint8, rtpMap string, fmtp map[stri
 		return &Generic{}
 	}()
 
+	// 交给对用的 Format 实例进行反序列化
 	err := format.unmarshal(&unmarshalContext{
 		mediaType:   mediaType,
 		payloadType: payloadType,
