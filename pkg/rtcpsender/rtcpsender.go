@@ -147,6 +147,7 @@ func (rs *RTCPSender) ProcessPacket(pkt *rtp.Packet, ntp time.Time, ptsEqualsDTS
 }
 
 // SenderSSRC returns the SSRC of outgoing RTP packets.
+// 返回传出 RTP 数据包的 SSRC
 func (rs *RTCPSender) SenderSSRC() (uint32, bool) {
 	rs.mutex.RLock()
 	defer rs.mutex.RUnlock()

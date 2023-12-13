@@ -131,16 +131,16 @@ type Server struct {
 	senderReportPeriod   time.Duration    // 默认 10s，且未发现配置该值的地方。用于 rtcpSender。
 	receiverReportPeriod time.Duration
 	sessionTimeout       time.Duration
-	checkStreamPeriod    time.Duration
+	checkStreamPeriod    time.Duration // 检查流周期
 
 	ctx             context.Context
 	ctxCancel       func()
 	wg              sync.WaitGroup
 	multicastNet    *net.IPNet
 	multicastNextIP net.IP
-	tcpListener     *serverTCPListener // 用于监听 RTSP 客户端的请求
-	udpRTPListener  *serverUDPListener
-	udpRTCPListener *serverUDPListener
+	tcpListener     *serverTCPListener        // 用于监听 RTSP 客户端的请求
+	udpRTPListener  *serverUDPListener        // UDP RTP 侦听器 (侦听地址端口由 s.UDPRTPAddress 配置)
+	udpRTCPListener *serverUDPListener        // UDP RTCP 侦听器 (侦听地址端口由 s.UDPRTCPAddress 配置)
 	sessions        map[string]*ServerSession // 保存客户端与服务端之间的 session。 key：SessionID;  value: session
 	conns           map[*ServerConn]struct{}  // 保存 RTSP 客户端与服务端建立的连接
 	closeError      error                     // 用于接收 runInner() 返回的错误
@@ -149,7 +149,7 @@ type Server struct {
 	chNewConn        chan net.Conn    // 当有新的 RTSP 客户端连接请求时
 	chCloseConn      chan *ServerConn // 关闭连接
 	chAcceptErr      chan error
-	chHandleRequest  chan sessionRequestReq // 处理 ServerConn 传递过来的 RTSP 请求
+	chHandleRequest  chan sessionRequestReq // RTSP 服务器处理 ServerConn 传递过来的 RTSP 请求
 	chCloseSession   chan *ServerSession
 	chGetMulticastIP chan chGetMulticastIPReq
 }
@@ -399,7 +399,7 @@ func (s *Server) runInner() error {
 			delete(s.conns, sc)
 			sc.Close()
 
-		case req := <-s.chHandleRequest: // 处理 Request（如果 session 不为空）
+		case req := <-s.chHandleRequest: // RTSP 服务器处理 Request
 			// 从 RTSP 服务器中查找是否有已存在的 session
 			if ss, ok := s.sessions[req.id]; ok {
 				// RTSP 服务器中有对应的 session 存在
@@ -416,7 +416,7 @@ func (s *Server) runInner() error {
 				}
 
 				select {
-				case ss.chHandleRequest <- req:
+				case ss.chHandleRequest <- req: // 将 RTSP 请求交给 C/S 之间建立的 会话 处理
 				case <-ss.ctx.Done():
 					req.res <- sessionRequestRes{
 						res: &base.Response{
@@ -444,7 +444,7 @@ func (s *Server) runInner() error {
 				ss := newServerSession(s, req.sc)
 				s.sessions[ss.secretID] = ss
 
-				// 会话创建完车，再次将请求交给 session 处理
+				// 会话创建完车，将请求交给建立的 会话 处理
 				select {
 				case ss.chHandleRequest <- req:
 				case <-ss.ctx.Done():
@@ -548,6 +548,7 @@ func (s *Server) handleRequest(req sessionRequestReq) (*base.Response, *ServerSe
 		}, req.sc.session, liberrors.ErrServerTerminated{}
 
 	case s.chHandleRequest <- req: // 交给 RTSP 服务器处理 Request
+		// 阻塞等待处理完成 Request
 		res := <-req.res
 		return res.res, res.ss, res.err
 

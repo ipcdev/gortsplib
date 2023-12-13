@@ -352,17 +352,19 @@ func (sc *ServerConn) handleRequestInner(req *base.Request) (*base.Response, err
 
 	case base.Setup:
 		// SETUP 方法
-		//
+		// 交给 会话 处理，如果会话尚未建立，则创建新的会话
 
+		// 检查 Handler 是否实现了 OnSetup() 回调
 		if _, ok := sc.s.Handler.(ServerHandlerOnSetup); ok {
 			return sc.handleRequestInSession(sxID, req, true)
 		}
 
 	case base.Play:
 		// PLAY 方法
-		//
+		// 处理 PLAY 请求，要求客户端与服务端之间已经建立会话，然后交给会话处理
 
 		if sxID != "" {
+			// 检查 Handler 是否实现了 OnPlay() 回调
 			if _, ok := sc.s.Handler.(ServerHandlerOnPlay); ok {
 				return sc.handleRequestInSession(sxID, req, false)
 			}
@@ -489,6 +491,8 @@ func (sc *ServerConn) handleRequestInSession(
 		if sxID != "" {
 			// the connection can't communicate with two sessions at once.
 			// 连接无法同时与两个会话通信。
+			//
+			// 检查 会话 ID 是否相同
 			if sxID != sc.session.secretID {
 				return &base.Response{
 					StatusCode: base.StatusBadRequest,
@@ -521,6 +525,7 @@ func (sc *ServerConn) handleRequestInSession(
 		res:    cres,
 	}
 
+	// 交给 RTSP 服务器处理 request
 	res, session, err := sc.s.handleRequest(sreq)
 	sc.session = session
 

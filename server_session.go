@@ -26,6 +26,8 @@ import (
 
 type readFunc func([]byte)
 
+// 索引从后向前，从 s 中检索 substr 字符串，
+// 返回 substr 字符串第一个字符的下标，如果没有检索到，返回 -1
 func stringsReverseIndex(s, substr string) int {
 	for i := len(s) - 1 - len(substr); i >= 0; i-- {
 		if s[i:i+len(substr)] == substr {
@@ -35,22 +37,36 @@ func stringsReverseIndex(s, substr string) int {
 	return -1
 }
 
+// 切分字符串，获取：
+//   - trackID  轨道ID
+//   - query    URL 参数部分
+//   - path     URL 路径部分
 func serverParseURLForPlay(u *url.URL) (string, string, string, error) {
 	pathAndQuery, ok := u.RTSPPathAndQuery()
 	if !ok {
 		return "", "", "", liberrors.ErrServerInvalidPath{}
 	}
 
+	// 从 URL 的 pathQuery 部分检索出 "/trackID=" 子串的下标
 	i := stringsReverseIndex(pathAndQuery, "/trackID=")
 	if i < 0 {
+		// i<0 表示为找到子串 "/trackID="
+
+		// 检查是否存在后缀 '/'
+		// 如果不存在，返回 error
 		if !strings.HasSuffix(pathAndQuery, "/") {
 			return "", "", "", liberrors.ErrServerPathNoSlash{}
 		}
 
+		// 对 pathAndQuery 进行切分（不包含后缀 "/"）
 		path, query := url.PathSplitQuery(pathAndQuery[:len(pathAndQuery)-1])
 		return path, query, "", nil
 	}
 
+	// 切分字符串，获取：
+	//  - trackID  轨道ID
+	//  - query    URL 参数部分
+	//  - path     URL 路径部分
 	var trackID string
 	pathAndQuery, trackID = pathAndQuery[:i], pathAndQuery[i+len("/trackID="):]
 	path, query := url.PathSplitQuery(pathAndQuery)
@@ -85,6 +101,7 @@ func findMediaByURL(medias []*description.Media, baseURL *url.URL, u *url.URL) *
 	return nil
 }
 
+// 通过 trackID 查找 媒体
 func findMediaByTrackID(medias []*description.Media, trackID string) *description.Media {
 	if trackID == "" {
 		return medias[0]
@@ -103,6 +120,7 @@ func findMediaByTrackID(medias []*description.Media, trackID string) *descriptio
 	return medias[id]
 }
 
+// 查找第一个支持的 Transport Header
 func findFirstSupportedTransportHeader(s *Server, tsh headers.Transports) *headers.Transport {
 	// Per RFC2326 section 12.39, client specifies transports in order of preference.
 	// Filter out the ones we don't support and then pick first supported transport.
@@ -110,16 +128,29 @@ func findFirstSupportedTransportHeader(s *Server, tsh headers.Transports) *heade
 		// 是否为广播 Multicast
 		isMulticast := tr.Delivery != nil && *tr.Delivery == headers.TransportDeliveryMulticast
 
+		// 传输协议为 UDP，有两种情况：
+		//  - 单播  udpRTPListener 不能为 nil
+		//  - 广播  MulticastIPRange 不能为 ""
 		if tr.Protocol == headers.TransportProtocolUDP &&
 			((!isMulticast && s.udpRTPListener == nil) ||
 				(isMulticast && s.MulticastIPRange == "")) {
+			// 传输协议 == UDP && ( (非广播 && udpRTPListener == nil) || (广播 && MulticastIPRange == "") )
+
 			continue
 		}
+
+		// 传输协议为 TCP，直接返回 Transport 头
 		return &tr
 	}
 	return nil
 }
 
+// 生成 RTP 信息
+//   - now                    当前时间
+//   - setuppedMediasOrdered  media 的顺序（按客户端 SETUP 的顺序）
+//   - setuppedStream         ServerStream
+//   - setuppedPath
+//   - u                      url
 func generateRTPInfo(
 	now time.Time,
 	setuppedMediasOrdered []*serverSessionMedia,
@@ -127,17 +158,21 @@ func generateRTPInfo(
 	setuppedPath string,
 	u *url.URL,
 ) (headers.RTPInfo, bool) {
+	// RTP-Info 头
 	var ri headers.RTPInfo
 
+	// 遍历所有 media
 	for _, sm := range setuppedMediasOrdered {
 		entry := setuppedStream.rtpInfoEntry(sm.media, now)
 		if entry != nil {
+			// 设置 RTP-Info 的 URL
 			entry.URL = (&url.URL{
 				Scheme: u.Scheme,
 				Host:   u.Host,
 				Path: setuppedPath + "/trackID=" +
 					strconv.FormatInt(int64(setuppedStream.streamMedias[sm.media].trackID), 10),
 			}).String()
+
 			ri = append(ri, entry)
 		}
 	}
@@ -196,25 +231,25 @@ type ServerSession struct {
 	bytesReceived         *uint64
 	bytesSent             *uint64
 	userData              interface{}
-	conns                 map[*ServerConn]struct{} // RTSP 连接
-	state                 ServerSessionState       // 会话状态
-	setuppedMedias        map[*description.Media]*serverSessionMedia
-	setuppedMediasOrdered []*serverSessionMedia
+	conns                 map[*ServerConn]struct{}                   // RTSP 连接
+	state                 ServerSessionState                         // 会话状态
+	setuppedMedias        map[*description.Media]*serverSessionMedia // 保存已经 SETUP 的 media，一条会话中包含多个 Media (例如， audio / video)
+	setuppedMediasOrdered []*serverSessionMedia                      // 按照 media SETUP 的顺序保存 serverSessionMedia
 	tcpCallbackByChannel  map[int]readFunc
 	setuppedTransport     *Transport    // 传输协议 TCP、UDP、UDP-Multicast（SETUP 请求设置）
-	setuppedStream        *ServerStream // read
-	setuppedPath          string        // RTSP URL Path 部分 (Announce 请求设置)
-	setuppedQuery         string        // RTSP URL Query 部分 (Announce 请求设置)
-	lastRequestTime       time.Time     // 最后一个客户端请求的时间
+	setuppedStream        *ServerStream // SETUP 请求的媒体流 (SETUP 请求设置)
+	setuppedPath          string        // RTSP URL Path 部分 (SETUP 请求设置) (Announce 请求设置)
+	setuppedQuery         string        // RTSP URL Query 部分 (SETUP 请求设置) (Announce 请求设置)
+	lastRequestTime       time.Time     // RTSP 服务器收到的最后一个客户端请求的时间
 	tcpConn               *ServerConn
 	announcedDesc         *description.Session // publish  从 announce 请求体 SDP 中解析得到的 RTSP 描述 (Announce 请求设置)
-	udpLastPacketTime     *int64               // publish  udp最后一个包的时间
-	udpCheckStreamTimer   *time.Timer
+	udpLastPacketTime     *int64               // publish  udp最后一个包的时间；(PLAY 请求时也会更新该值)
+	udpCheckStreamTimer   *time.Timer          // UDP 检查流定时器
 	writer                asyncProcessor
-	timeDecoder           *rtptime.GlobalDecoder
+	timeDecoder           *rtptime.GlobalDecoder // time 的解码器
 
 	// in
-	chHandleRequest chan sessionRequestReq // 接收 RTSP 请求
+	chHandleRequest chan sessionRequestReq // C/S 直接建立的会话，接收 RTSP 请求并进行处理
 	chRemoveConn    chan *ServerConn
 	chStartWriter   chan struct{}
 }
@@ -422,15 +457,17 @@ func (ss *ServerSession) run() {
 func (ss *ServerSession) runInner() error {
 	for {
 		select {
-		case req := <-ss.chHandleRequest:
+		case req := <-ss.chHandleRequest: // 处理 RTSP 客户端发送来的请求
 			// 更新请求时间
 			ss.lastRequestTime = ss.s.timeNow()
 
 			// 检查 RTSP 连接是否在
 			if _, ok := ss.conns[req.sc]; !ok {
+				// 记录连接
 				ss.conns[req.sc] = struct{}{}
 			}
 
+			// 处理 request
 			res, err := ss.handleRequestInner(req.sc, req.req)
 
 			returnedSession := ss
@@ -527,13 +564,26 @@ func (ss *ServerSession) runInner() error {
 	}
 }
 
+// 处理以下 RTSP 请求：
+//   - OPTIONS
+//   - SETUP
+//   - PLAY
+//   - ANNOUNCE
+//   - RECORD
+//   - PAUSE
+//   - TEARDOWN
+//   - GET_PARAMETER
+//   - SET_PARAMETER
 func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (*base.Response, error) {
+	// 检查 tcpConn
 	if ss.tcpConn != nil && sc != ss.tcpConn {
 		return &base.Response{
 			StatusCode: base.StatusBadRequest,
 		}, liberrors.ErrServerSessionLinkedToOtherConn{}
 	}
 
+	// 如果请求方法为： ANNOUNCE、PLAY、RECORD、PAUSE、GET_PARAMETER、SET_PARAMETER，
+	// 则获取 URL 的 Path 部分、Query 部分。
 	var path string
 	var query string
 	switch req.Method {
@@ -546,6 +596,7 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 		}
 
 		// pathAndQuery can end with a slash due to Content-Base, remove it
+		// 由于 Content-Base，pathAndQuery 可能以 / 结尾，请将其删除
 		if ss.state == ServerSessionStatePrePlay || ss.state == ServerSessionStatePlay {
 			pathAndQuery = strings.TrimSuffix(pathAndQuery, "/")
 		}
@@ -555,7 +606,13 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 
 	switch req.Method {
 	case base.Options:
+		// OPTIONS 方法
+		// 默认支持：GET_PARAMETER、TEARDOWN
+		//
+		// 将 RTSP 服务器支持的方法，放到响应的 Public 头中
+
 		var methods []string
+
 		if _, ok := sc.s.Handler.(ServerHandlerOnDescribe); ok {
 			methods = append(methods, string(base.Describe))
 		}
@@ -574,10 +631,13 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 		if _, ok := sc.s.Handler.(ServerHandlerOnPause); ok {
 			methods = append(methods, string(base.Pause))
 		}
+
 		methods = append(methods, string(base.GetParameter))
+
 		if _, ok := sc.s.Handler.(ServerHandlerOnSetParameter); ok {
 			methods = append(methods, string(base.SetParameter))
 		}
+
 		methods = append(methods, string(base.Teardown))
 
 		return &base.Response{
@@ -586,6 +646,417 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 				"Public": base.HeaderValue{strings.Join(methods, ", ")},
 			},
 		}, nil
+
+	case base.Setup:
+		// SETUP 方法
+		//
+		// C -> S SETUP request  // 通过 Transport 头字段列出可接受的传输选项，请求 S 建立会话
+		// S -> C SETUP response // S建立会话，通过 Transport 头字段返回选择的具体转输选项，并返回建立的 Session ID;
+		//
+		// 客户端与服务端之间建立会话；
+		// 解析 Transport 头，协商 RTP、RTCP 的传输方式、使用的端口
+
+		// 检查会话状态
+		err := ss.checkState(map[ServerSessionState]struct{}{
+			ServerSessionStateInitial:   {},
+			ServerSessionStatePrePlay:   {},
+			ServerSessionStatePreRecord: {},
+		})
+		if err != nil {
+			return &base.Response{
+				StatusCode: base.StatusBadRequest,
+			}, err
+		}
+
+		// 反序列化 Transport 头
+		// 例如：
+		//      Transport: RTP/AVP;unicast;client_port=58258-58259
+		var inTSH headers.Transports
+		err = inTSH.Unmarshal(req.Header["Transport"])
+		if err != nil {
+			return &base.Response{
+				StatusCode: base.StatusBadRequest,
+			}, liberrors.ErrServerTransportHeaderInvalid{Err: err}
+		}
+
+		// 查找第一个支持的 Transport 头
+		inTH := findFirstSupportedTransportHeader(ss.s, inTSH)
+		if inTH == nil {
+			return &base.Response{
+				StatusCode: base.StatusUnsupportedTransport,
+			}, nil
+		}
+
+		var path string
+		var query string
+		var trackID string
+
+		// 检查 会话 状态
+		switch ss.state {
+		case ServerSessionStateInitial, ServerSessionStatePrePlay: // play
+			var err error
+
+			// 切分 URL，获取 path、query、trackID
+			path, query, trackID, err = serverParseURLForPlay(req.URL)
+			if err != nil {
+				return &base.Response{
+					StatusCode: base.StatusBadRequest,
+				}, err
+			}
+
+			if ss.state == ServerSessionStatePrePlay && path != ss.setuppedPath {
+				return &base.Response{
+					StatusCode: base.StatusBadRequest,
+				}, liberrors.ErrServerMediasDifferentPaths{}
+			}
+
+		default: // record
+			path = ss.setuppedPath
+			query = ss.setuppedQuery
+		}
+
+		// 传输方式：TCP、UDP、UDP-Multicast
+		var transport Transport
+
+		// UDP
+		if inTH.Protocol == headers.TransportProtocolUDP {
+			if inTH.Delivery != nil && *inTH.Delivery == headers.TransportDeliveryMulticast {
+				// UDP Multicast
+				// UDP 广播
+				transport = TransportUDPMulticast
+			} else {
+				// UDP Unicast
+				// UDP 单播
+				transport = TransportUDP
+
+				// UDP 单播，ClientPorts 不能为 nil
+				if inTH.ClientPorts == nil {
+					return &base.Response{
+						StatusCode: base.StatusBadRequest,
+					}, liberrors.ErrServerTransportHeaderNoClientPorts{}
+				}
+			}
+		} else {
+			// TCP
+
+			transport = TransportTCP
+
+			if inTH.InterleavedIDs != nil {
+				if (inTH.InterleavedIDs[0] + 1) != inTH.InterleavedIDs[1] {
+					return &base.Response{
+						StatusCode: base.StatusBadRequest,
+					}, liberrors.ErrServerTransportHeaderInvalidInterleavedIDs{}
+				}
+
+				if ss.isChannelPairInUse(inTH.InterleavedIDs[0]) {
+					return &base.Response{
+						StatusCode: base.StatusBadRequest,
+					}, liberrors.ErrServerTransportHeaderInterleavedIDsInUse{}
+				}
+			}
+		}
+
+		// 传输协议校验
+		if ss.setuppedTransport != nil && *ss.setuppedTransport != transport {
+			return &base.Response{
+				StatusCode: base.StatusBadRequest,
+			}, liberrors.ErrServerMediasDifferentProtocols{}
+		}
+
+		// 检查 Transport 头的 Mode
+		switch ss.state {
+		case ServerSessionStateInitial, ServerSessionStatePrePlay: // play
+			if inTH.Mode != nil && *inTH.Mode != headers.TransportModePlay {
+				return &base.Response{
+					StatusCode: base.StatusBadRequest,
+				}, liberrors.ErrServerTransportHeaderInvalidMode{Mode: *inTH.Mode}
+			}
+
+		default: // record
+			if transport == TransportUDPMulticast {
+				return &base.Response{
+					StatusCode: base.StatusUnsupportedTransport,
+				}, nil
+			}
+
+			if inTH.Mode == nil || *inTH.Mode != headers.TransportModeRecord {
+				return &base.Response{
+					StatusCode: base.StatusBadRequest,
+				}, liberrors.ErrServerTransportHeaderInvalidMode{Mode: *inTH.Mode}
+			}
+		}
+
+		// 调用 OnSetup 回调
+		// mediamtx 实现
+		res, stream, err := ss.s.Handler.(ServerHandlerOnSetup).OnSetup(&ServerHandlerOnSetupCtx{
+			Session:   ss,
+			Conn:      sc,
+			Request:   req,
+			Path:      path,
+			Query:     query,
+			Transport: transport,
+		})
+
+		// workaround to prevent a bug in rtspclientsink
+		// that makes impossible for the client to receive the response
+		// and send frames.
+		// this was causing problems during unit tests.
+		//
+		// 解决方法可防止 rtspclientsink 中的错误导致客户端无法接收响应并发送帧。
+		// 这在单元测试期间引起了问题。
+		if ua, ok := req.Header["User-Agent"]; ok && len(ua) == 1 &&
+			strings.HasPrefix(ua[0], "GStreamer") {
+			select {
+			case <-time.After(1 * time.Second):
+			case <-ss.ctx.Done():
+			}
+		}
+
+		// 检查 OnSetup 响应状态码
+		if res.StatusCode != base.StatusOK {
+			return res, err
+		}
+
+		var medi *description.Media
+		switch ss.state {
+		case ServerSessionStateInitial, ServerSessionStatePrePlay: // play
+			// 通过 轨道ID 查找 媒体
+			medi = findMediaByTrackID(stream.desc.Medias, trackID)
+		default: // record
+			medi = findMediaByURL(ss.announcedDesc.Medias, recordBaseURL(req.URL, path, query), req.URL)
+		}
+
+		// 没找到媒体
+		if medi == nil {
+			return &base.Response{
+				StatusCode: base.StatusBadRequest,
+			}, liberrors.ErrServerMediaNotFound{}
+		}
+
+		// 检查 media 是否已经 setup
+		if _, ok := ss.setuppedMedias[medi]; ok {
+			return &base.Response{
+				StatusCode: base.StatusBadRequest,
+			}, liberrors.ErrServerMediaAlreadySetup{}
+		}
+
+		// 设置传输协议
+		ss.setuppedTransport = &transport
+
+		if ss.state == ServerSessionStateInitial {
+			// 媒体流添加 reader
+			err := stream.readerAdd(ss,
+				inTH.ClientPorts,
+			)
+			if err != nil {
+				return &base.Response{
+					StatusCode: base.StatusBadRequest,
+				}, err
+			}
+
+			// 更新会话的状态
+			ss.state = ServerSessionStatePrePlay
+			ss.setuppedPath = path
+			ss.setuppedQuery = query
+			ss.setuppedStream = stream
+		}
+
+		// 生成 SETUP 响应的 Transport 头
+		th := headers.Transport{}
+
+		// SETUP 响应的 Transport 头的 SSRC
+		if ss.state == ServerSessionStatePrePlay {
+			// RTSP 流 -> media -> format -> rtcpSender.SSRC (当 PTS == DTS 是，记录的 RTP 包的 SSRC)
+			ssrc, ok := stream.senderSSRC(medi)
+			if ok {
+				th.SSRC = &ssrc
+			}
+		}
+
+		if res.Header == nil {
+			res.Header = make(base.Header)
+		}
+
+		// 创建服务端 sessionMedia
+		sm := newServerSessionMedia(ss, medi)
+
+		switch transport {
+		case TransportUDP:
+			// UDP 单播
+
+			sm.udpRTPReadPort = inTH.ClientPorts[0]  // Transport 头的 client_port
+			sm.udpRTCPReadPort = inTH.ClientPorts[1] // Transport 头的 client_port
+
+			sm.udpRTPWriteAddr = &net.UDPAddr{
+				IP:   ss.author.ip(),
+				Zone: ss.author.zone(),
+				Port: sm.udpRTPReadPort,
+			}
+
+			sm.udpRTCPWriteAddr = &net.UDPAddr{
+				IP:   ss.author.ip(),
+				Zone: ss.author.zone(),
+				Port: sm.udpRTCPReadPort,
+			}
+
+			// SETUP 响应的 Transport 头的 Protocol
+			th.Protocol = headers.TransportProtocolUDP
+			// SETUP 响应的 Transport 头的 交付方式
+			de := headers.TransportDeliveryUnicast
+			th.Delivery = &de
+			// 客户端端口（RTP、RTCP）
+			th.ClientPorts = inTH.ClientPorts
+			// 服务端端口（RTP、RTCP）
+			th.ServerPorts = &[2]int{sc.s.udpRTPListener.port(), sc.s.udpRTCPListener.port()}
+
+		case TransportUDPMulticast:
+			// UDP 广播
+
+			th.Protocol = headers.TransportProtocolUDP
+			de := headers.TransportDeliveryMulticast
+			th.Delivery = &de
+			v := uint(127)
+			th.TTL = &v
+			d := stream.streamMedias[medi].multicastWriter.ip()
+			th.Destination = &d
+			th.Ports = &[2]int{ss.s.MulticastRTPPort, ss.s.MulticastRTCPPort}
+
+		default: // TCP
+			if inTH.InterleavedIDs != nil {
+				sm.tcpChannel = inTH.InterleavedIDs[0]
+			} else {
+				sm.tcpChannel = ss.findFreeChannelPair()
+			}
+
+			th.Protocol = headers.TransportProtocolTCP
+			de := headers.TransportDeliveryUnicast
+			th.Delivery = &de
+			th.InterleavedIDs = &[2]int{sm.tcpChannel, sm.tcpChannel + 1}
+		}
+
+		// 初始化 setuppedMedias
+		if ss.setuppedMedias == nil {
+			ss.setuppedMedias = make(map[*description.Media]*serverSessionMedia)
+		}
+		ss.setuppedMedias[medi] = sm
+		ss.setuppedMediasOrdered = append(ss.setuppedMediasOrdered, sm)
+
+		// 将 Transport 头添加到响应中
+		res.Header["Transport"] = th.Marshal()
+
+		return res, err
+
+	case base.Play:
+		// PLAY 方法
+		//
+
+		// play can be sent twice, allow calling it even if we're already playing
+		// 可以发送两次 play，即使我们已经正在 playing 也允许调用它
+
+		// 检查会话的状态
+		err := ss.checkState(map[ServerSessionState]struct{}{
+			ServerSessionStatePrePlay: {},
+			ServerSessionStatePlay:    {},
+		})
+		if err != nil {
+			return &base.Response{
+				StatusCode: base.StatusBadRequest,
+			}, err
+		}
+
+		// 检查 path
+		if ss.State() == ServerSessionStatePrePlay && path != ss.setuppedPath {
+			return &base.Response{
+				StatusCode: base.StatusBadRequest,
+			}, liberrors.ErrServerPathHasChanged{Prev: ss.setuppedPath, Cur: path}
+		}
+
+		// allocate writeBuffer before calling OnPlay().
+		// in this way it's possible to call ServerSession.WritePacket*()
+		// inside the callback.
+		//
+		// 在调用 OnPlay() 之前分配 writeBuffer。
+		// 这样就可以在回调中调用 ServerSession.WritePacket*()。
+		if ss.state != ServerSessionStatePlay &&
+			*ss.setuppedTransport != TransportUDPMulticast {
+			// 会话状态 != Play && 传输方式 != UDP 广播
+
+			// 初始化 写队列大小
+			ss.writer.allocateBuffer(ss.s.WriteQueueSize)
+		}
+
+		// 执行 onPlay 回调
+		res, err := sc.s.Handler.(ServerHandlerOnPlay).OnPlay(&ServerHandlerOnPlayCtx{
+			Session: ss,
+			Conn:    sc,
+			Request: req,
+			Path:    path,
+			Query:   query,
+		})
+
+		// 检查 OnPlay 回调响应码
+		if res.StatusCode != base.StatusOK {
+			if ss.state != ServerSessionStatePlay {
+				// 如果 会话状态 != Play，则 writer buffer 置为 nil
+				ss.writer.buffer = nil
+			}
+			return res, err
+		}
+
+		// 如果会话状态为 Play，直接返回响应
+		if ss.state == ServerSessionStatePlay {
+			return res, err
+		}
+
+		// 如果会话状态非 Play，更新为 Play 状态
+		ss.state = ServerSessionStatePlay
+
+		// 获取当前时间
+		v := ss.s.timeNow().Unix()
+		ss.udpLastPacketTime = &v
+
+		// 更新为 RTP 时间戳解码器
+		ss.timeDecoder = rtptime.NewGlobalDecoder()
+
+		for _, sm := range ss.setuppedMedias {
+			sm.start()
+		}
+
+		switch *ss.setuppedTransport {
+		case TransportUDP:
+			ss.udpCheckStreamTimer = time.NewTimer(ss.s.checkStreamPeriod)
+			ss.writer.start()
+
+		case TransportUDPMulticast:
+			ss.udpCheckStreamTimer = time.NewTimer(ss.s.checkStreamPeriod)
+
+		default: // TCP
+			ss.tcpConn = sc
+			err = errSwitchReadFunc{true}
+			// writer.start() is called by ServerConn after the response has been sent
+		}
+
+		// 设置 reader 为 Active
+		ss.setuppedStream.readerSetActive(ss)
+
+		// 生成 RTP-Info 头
+		rtpInfo, ok := generateRTPInfo(
+			ss.s.timeNow(),
+			ss.setuppedMediasOrdered,
+			ss.setuppedStream,
+			ss.setuppedPath,
+			req.URL)
+
+		if ok {
+			if res.Header == nil {
+				res.Header = make(base.Header)
+			}
+
+			// 将 "RTP-Info" 头添加到响应中
+			res.Header["RTP-Info"] = rtpInfo.Marshal()
+		}
+
+		return res, err
 
 	case base.Announce:
 		// Announce 方法有两个用途：
@@ -681,354 +1152,6 @@ func (ss *ServerSession) handleRequestInner(sc *ServerConn, req *base.Request) (
 		ss.setuppedPath = path
 		ss.setuppedQuery = query
 		ss.announcedDesc = &desc
-
-		return res, err
-
-	case base.Setup:
-		// C -> S SETUP request  // 通过 Transport 头字段列出可接受的传输选项，请求 S 建立会话
-		// S -> C SETUP response // S建立会话，通过 Transport 头字段返回选择的具体转输选项，并返回建立的 Session ID;
-
-		err := ss.checkState(map[ServerSessionState]struct{}{
-			ServerSessionStateInitial:   {},
-			ServerSessionStatePrePlay:   {},
-			ServerSessionStatePreRecord: {},
-		})
-		if err != nil {
-			return &base.Response{
-				StatusCode: base.StatusBadRequest,
-			}, err
-		}
-
-		var inTSH headers.Transports
-		// 反序列化 Transport 头
-		err = inTSH.Unmarshal(req.Header["Transport"])
-		if err != nil {
-			return &base.Response{
-				StatusCode: base.StatusBadRequest,
-			}, liberrors.ErrServerTransportHeaderInvalid{Err: err}
-		}
-
-		inTH := findFirstSupportedTransportHeader(ss.s, inTSH)
-		if inTH == nil {
-			return &base.Response{
-				StatusCode: base.StatusUnsupportedTransport,
-			}, nil
-		}
-
-		var path string
-		var query string
-		var trackID string
-
-		switch ss.state {
-		case ServerSessionStateInitial, ServerSessionStatePrePlay: // play
-			var err error
-			path, query, trackID, err = serverParseURLForPlay(req.URL)
-			if err != nil {
-				return &base.Response{
-					StatusCode: base.StatusBadRequest,
-				}, err
-			}
-
-			if ss.state == ServerSessionStatePrePlay && path != ss.setuppedPath {
-				return &base.Response{
-					StatusCode: base.StatusBadRequest,
-				}, liberrors.ErrServerMediasDifferentPaths{}
-			}
-
-		default: // record
-			path = ss.setuppedPath
-			query = ss.setuppedQuery
-		}
-
-		// 传输方式：TCP、UDP、UDP-Multicast
-		var transport Transport
-
-		if inTH.Protocol == headers.TransportProtocolUDP {
-			if inTH.Delivery != nil && *inTH.Delivery == headers.TransportDeliveryMulticast {
-				// UDP Multicast
-				transport = TransportUDPMulticast
-			} else {
-				// UDP Unicast
-				transport = TransportUDP
-
-				if inTH.ClientPorts == nil {
-					return &base.Response{
-						StatusCode: base.StatusBadRequest,
-					}, liberrors.ErrServerTransportHeaderNoClientPorts{}
-				}
-			}
-		} else {
-			transport = TransportTCP
-
-			if inTH.InterleavedIDs != nil {
-				if (inTH.InterleavedIDs[0] + 1) != inTH.InterleavedIDs[1] {
-					return &base.Response{
-						StatusCode: base.StatusBadRequest,
-					}, liberrors.ErrServerTransportHeaderInvalidInterleavedIDs{}
-				}
-
-				if ss.isChannelPairInUse(inTH.InterleavedIDs[0]) {
-					return &base.Response{
-						StatusCode: base.StatusBadRequest,
-					}, liberrors.ErrServerTransportHeaderInterleavedIDsInUse{}
-				}
-			}
-		}
-
-		// 传输协议校验
-		if ss.setuppedTransport != nil && *ss.setuppedTransport != transport {
-			return &base.Response{
-				StatusCode: base.StatusBadRequest,
-			}, liberrors.ErrServerMediasDifferentProtocols{}
-		}
-
-		switch ss.state {
-		case ServerSessionStateInitial, ServerSessionStatePrePlay: // play
-			if inTH.Mode != nil && *inTH.Mode != headers.TransportModePlay {
-				return &base.Response{
-					StatusCode: base.StatusBadRequest,
-				}, liberrors.ErrServerTransportHeaderInvalidMode{Mode: *inTH.Mode}
-			}
-
-		default: // record
-			if transport == TransportUDPMulticast {
-				return &base.Response{
-					StatusCode: base.StatusUnsupportedTransport,
-				}, nil
-			}
-
-			if inTH.Mode == nil || *inTH.Mode != headers.TransportModeRecord {
-				return &base.Response{
-					StatusCode: base.StatusBadRequest,
-				}, liberrors.ErrServerTransportHeaderInvalidMode{Mode: *inTH.Mode}
-			}
-		}
-
-		// 调用 OnSetup 回调
-		res, stream, err := ss.s.Handler.(ServerHandlerOnSetup).OnSetup(&ServerHandlerOnSetupCtx{
-			Session:   ss,
-			Conn:      sc,
-			Request:   req,
-			Path:      path,
-			Query:     query,
-			Transport: transport,
-		})
-
-		// workaround to prevent a bug in rtspclientsink
-		// that makes impossible for the client to receive the response
-		// and send frames.
-		// this was causing problems during unit tests.
-		//
-		// 解决方法可防止 rtspclientsink 中的错误导致客户端无法接收响应并发送帧。
-		// 这在单元测试期间引起了问题。
-		if ua, ok := req.Header["User-Agent"]; ok && len(ua) == 1 &&
-			strings.HasPrefix(ua[0], "GStreamer") {
-			select {
-			case <-time.After(1 * time.Second):
-			case <-ss.ctx.Done():
-			}
-		}
-
-		if res.StatusCode != base.StatusOK {
-			return res, err
-		}
-
-		var medi *description.Media
-		switch ss.state {
-		case ServerSessionStateInitial, ServerSessionStatePrePlay: // play
-			medi = findMediaByTrackID(stream.desc.Medias, trackID)
-		default: // record
-			medi = findMediaByURL(ss.announcedDesc.Medias, recordBaseURL(req.URL, path, query), req.URL)
-		}
-
-		if medi == nil {
-			return &base.Response{
-				StatusCode: base.StatusBadRequest,
-			}, liberrors.ErrServerMediaNotFound{}
-		}
-
-		if _, ok := ss.setuppedMedias[medi]; ok {
-			return &base.Response{
-				StatusCode: base.StatusBadRequest,
-			}, liberrors.ErrServerMediaAlreadySetup{}
-		}
-
-		// 设置传输协议
-		ss.setuppedTransport = &transport
-
-		if ss.state == ServerSessionStateInitial {
-			err := stream.readerAdd(ss,
-				inTH.ClientPorts,
-			)
-			if err != nil {
-				return &base.Response{
-					StatusCode: base.StatusBadRequest,
-				}, err
-			}
-
-			ss.state = ServerSessionStatePrePlay
-			ss.setuppedPath = path
-			ss.setuppedQuery = query
-			ss.setuppedStream = stream
-		}
-
-		th := headers.Transport{}
-
-		if ss.state == ServerSessionStatePrePlay {
-			ssrc, ok := stream.senderSSRC(medi)
-			if ok {
-				th.SSRC = &ssrc
-			}
-		}
-
-		if res.Header == nil {
-			res.Header = make(base.Header)
-		}
-
-		// 创建服务端 session
-		sm := newServerSessionMedia(ss, medi)
-
-		switch transport {
-		case TransportUDP:
-			sm.udpRTPReadPort = inTH.ClientPorts[0]
-			sm.udpRTCPReadPort = inTH.ClientPorts[1]
-
-			sm.udpRTPWriteAddr = &net.UDPAddr{
-				IP:   ss.author.ip(),
-				Zone: ss.author.zone(),
-				Port: sm.udpRTPReadPort,
-			}
-
-			sm.udpRTCPWriteAddr = &net.UDPAddr{
-				IP:   ss.author.ip(),
-				Zone: ss.author.zone(),
-				Port: sm.udpRTCPReadPort,
-			}
-
-			th.Protocol = headers.TransportProtocolUDP
-			de := headers.TransportDeliveryUnicast
-			th.Delivery = &de
-			th.ClientPorts = inTH.ClientPorts
-			th.ServerPorts = &[2]int{sc.s.udpRTPListener.port(), sc.s.udpRTCPListener.port()}
-
-		case TransportUDPMulticast:
-			th.Protocol = headers.TransportProtocolUDP
-			de := headers.TransportDeliveryMulticast
-			th.Delivery = &de
-			v := uint(127)
-			th.TTL = &v
-			d := stream.streamMedias[medi].multicastWriter.ip()
-			th.Destination = &d
-			th.Ports = &[2]int{ss.s.MulticastRTPPort, ss.s.MulticastRTCPPort}
-
-		default: // TCP
-			if inTH.InterleavedIDs != nil {
-				sm.tcpChannel = inTH.InterleavedIDs[0]
-			} else {
-				sm.tcpChannel = ss.findFreeChannelPair()
-			}
-
-			th.Protocol = headers.TransportProtocolTCP
-			de := headers.TransportDeliveryUnicast
-			th.Delivery = &de
-			th.InterleavedIDs = &[2]int{sm.tcpChannel, sm.tcpChannel + 1}
-		}
-
-		if ss.setuppedMedias == nil {
-			ss.setuppedMedias = make(map[*description.Media]*serverSessionMedia)
-		}
-		ss.setuppedMedias[medi] = sm
-		ss.setuppedMediasOrdered = append(ss.setuppedMediasOrdered, sm)
-
-		res.Header["Transport"] = th.Marshal()
-
-		return res, err
-
-	case base.Play:
-		// play can be sent twice, allow calling it even if we're already playing
-		err := ss.checkState(map[ServerSessionState]struct{}{
-			ServerSessionStatePrePlay: {},
-			ServerSessionStatePlay:    {},
-		})
-		if err != nil {
-			return &base.Response{
-				StatusCode: base.StatusBadRequest,
-			}, err
-		}
-
-		if ss.State() == ServerSessionStatePrePlay && path != ss.setuppedPath {
-			return &base.Response{
-				StatusCode: base.StatusBadRequest,
-			}, liberrors.ErrServerPathHasChanged{Prev: ss.setuppedPath, Cur: path}
-		}
-
-		// allocate writeBuffer before calling OnPlay().
-		// in this way it's possible to call ServerSession.WritePacket*()
-		// inside the callback.
-		if ss.state != ServerSessionStatePlay &&
-			*ss.setuppedTransport != TransportUDPMulticast {
-			ss.writer.allocateBuffer(ss.s.WriteQueueSize)
-		}
-
-		res, err := sc.s.Handler.(ServerHandlerOnPlay).OnPlay(&ServerHandlerOnPlayCtx{
-			Session: ss,
-			Conn:    sc,
-			Request: req,
-			Path:    path,
-			Query:   query,
-		})
-
-		if res.StatusCode != base.StatusOK {
-			if ss.state != ServerSessionStatePlay {
-				ss.writer.buffer = nil
-			}
-			return res, err
-		}
-
-		if ss.state == ServerSessionStatePlay {
-			return res, err
-		}
-
-		ss.state = ServerSessionStatePlay
-
-		v := ss.s.timeNow().Unix()
-		ss.udpLastPacketTime = &v
-
-		ss.timeDecoder = rtptime.NewGlobalDecoder()
-
-		for _, sm := range ss.setuppedMedias {
-			sm.start()
-		}
-
-		switch *ss.setuppedTransport {
-		case TransportUDP:
-			ss.udpCheckStreamTimer = time.NewTimer(ss.s.checkStreamPeriod)
-			ss.writer.start()
-
-		case TransportUDPMulticast:
-			ss.udpCheckStreamTimer = time.NewTimer(ss.s.checkStreamPeriod)
-
-		default: // TCP
-			ss.tcpConn = sc
-			err = errSwitchReadFunc{true}
-			// writer.start() is called by ServerConn after the response has been sent
-		}
-
-		ss.setuppedStream.readerSetActive(ss)
-
-		rtpInfo, ok := generateRTPInfo(
-			ss.s.timeNow(),
-			ss.setuppedMediasOrdered,
-			ss.setuppedStream,
-			ss.setuppedPath,
-			req.URL)
-
-		if ok {
-			if res.Header == nil {
-				res.Header = make(base.Header)
-			}
-			res.Header["RTP-Info"] = rtpInfo.Marshal()
-		}
 
 		return res, err
 

@@ -51,9 +51,10 @@ const (
 type TransportDelivery int
 
 // transport delivery methods.
+// 传输交付方法
 const (
-	TransportDeliveryUnicast TransportDelivery = iota
-	TransportDeliveryMulticast
+	TransportDeliveryUnicast   TransportDelivery = iota // 单播
+	TransportDeliveryMulticast                          // 广播
 )
 
 // TransportMode is a transport mode.
@@ -95,6 +96,7 @@ type Transport struct {
 	Ports *[2]int
 
 	// (optional) client ports
+	// ClientPorts[0] RTP 端口；ClientPorts[1] RTCP 端口
 	ClientPorts *[2]int
 
 	// (optional) server ports
@@ -332,7 +334,7 @@ type Transports []Transport
 //
 // 示例：
 //
-//		Transport: RTP/AVP/UDP;unicast;client_port=22494-22495;mode=record
+//		Transport: RTP/AVP;unicast;client_port=22494-22495
 //
 //	 client_port=22494-22495 解析： 22494 为 RTP 端口、22495 为 RTCP 端口
 func (ts *Transports) Unmarshal(v base.HeaderValue) error {

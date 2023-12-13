@@ -12,6 +12,7 @@ import (
 	"github.com/bluenviron/gortsplib/v4/pkg/liberrors"
 )
 
+// 第一个 Format
 func firstFormat(formats map[uint8]*serverStreamFormat) *serverStreamFormat {
 	var firstKey uint8
 	for key := range formats {
@@ -95,6 +96,9 @@ func (st *ServerStream) senderSSRC(medi *description.Media) (uint32, bool) {
 	// senderSSRC() is used to fill SSRC inside the Transport header.
 	// if there are multiple formats inside a single media stream,
 	// do not return anything, since Transport headers don't support multiple SSRCs.
+	//
+	// senderSSRC() 用于填充传输标头内的 SSRC。
+	// 如果单个媒体流中有多种格式，则不返回任何内容，因为传输标头不支持多个 SSRC。
 	if len(sm.formats) > 1 {
 		return 0, false
 	}
@@ -208,6 +212,7 @@ func (st *ServerStream) readerRemove(ss *ServerSession) {
 	}
 }
 
+// 设置 reader 为 Active
 func (st *ServerStream) readerSetActive(ss *ServerSession) {
 	st.mutex.Lock()
 	defer st.mutex.Unlock()

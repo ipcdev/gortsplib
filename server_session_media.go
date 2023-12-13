@@ -17,10 +17,10 @@ type serverSessionMedia struct {
 	ss                     *ServerSession
 	media                  *description.Media
 	tcpChannel             int
-	udpRTPReadPort         int
-	udpRTPWriteAddr        *net.UDPAddr
-	udpRTCPReadPort        int
-	udpRTCPWriteAddr       *net.UDPAddr
+	udpRTPReadPort         int          // UDP RTP 读 端口 (从 SETUP 请求 Transport 头的 client_port 解析得到)
+	udpRTPWriteAddr        *net.UDPAddr // UDP RTP 写地址 （客户端的 IP、端口）
+	udpRTCPReadPort        int          // UDP RTCP 读 端口  (从 SETUP 请求 Transport 头的 client_port 解析得到)
+	udpRTCPWriteAddr       *net.UDPAddr // UDP RTCP 写地址 （客户端的 IP、端口）
 	tcpRTPFrame            *base.InterleavedFrame
 	tcpRTCPFrame           *base.InterleavedFrame
 	tcpBuffer              []byte
